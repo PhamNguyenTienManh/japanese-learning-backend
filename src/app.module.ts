@@ -31,7 +31,7 @@ import { AiChatSessionsModule } from './ai_chat_sessions/ai_chat_sessions.module
 
 @Module({
   imports: [
-    MongooseModule.forRoot('mongodb://localhost:27017/mydb'), // thay bằng URI của bạn
+    MongooseModule.forRoot('mongodb://localhost:27017/JAVI'), // thay bằng URI của bạn
     UsersModule, ProfilesModule, TrophiesModule, UserTrophiesModule, UserWordsModule, SearchHistoryModule, UserStreaksModule, UserStreakHistoryModule, UserNotificationsModule, JlptKanjiModule, JlptWordModule, JlptGrammarModule, NotebookModule, NotebookItemModule, FlashcardModule, ExamsModule, ExamsPartModule, ExamQuestionModule, ExamResultsModule, ExamResultsDetailModule, ExamUserAnswersModule, PostsModule, PostCategoriesModule, CommentsModule, ParCommentModule, NewsModule, NotificationsModule, AiChatSessionsModule,
   ],
 })
