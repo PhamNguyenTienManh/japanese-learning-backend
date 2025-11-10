@@ -27,28 +27,27 @@ export class Post extends Document {
   @Prop({ type: Number, default: 0, min: 0 })
   dislike: number; // Số lượt không thích
 
-  @Prop({ type: Number, default: 0, min: 0 })
-  share: number; // Số lượt chia sẻ
+  // @Prop({ type: Number, default: 0, min: 0 })
+  // share: number; // Số lượt chia sẻ
 
   @Prop({ type: Number, default: 1 })
   status: number; 
   // 0 = ẩn, 1 = công khai, 2 = chờ duyệt,...
 
-  @Prop({ type: Number, default: 0 })
-  top: number; 
-  // 1 nếu bài viết được ghim/trending, 0 là bình thường
+  // @Prop({ type: Number, default: 0 })
+  // top: number; 
+  // // 1 nếu bài viết được ghim/trending, 0 là bình thường
 
-  @Prop({ type: String })
-  image?: string; // Ảnh thumbnail (nếu có)
+  // @Prop({ type: String })
+  // image?: string; // Ảnh thumbnail (nếu có)
 
-  @Prop({ type: String })
-  link?: string; // Link đính kèm (nếu bài viết chia sẻ tài liệu ngoài)
+  // @Prop({ type: String })
+  // link?: string; // Link đính kèm (nếu bài viết chia sẻ tài liệu ngoài)
 
-  @Prop({ type: Number, default: 0 })
-  review_status: number; 
-  // 0 = chưa duyệt, 1 = đã duyệt, 2 = từ chối, ...
+  // @Prop({ type: Number, default: 0 })
+  // review_status: number; 
+  // // 0 = chưa duyệt, 1 = đã duyệt, 2 = từ chối, ...
 
-  // created_at & updated_at sẽ tự sinh nhờ timestamps
 }
 
 export const PostSchema = SchemaFactory.createForClass(Post);
