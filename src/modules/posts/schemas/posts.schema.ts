@@ -2,7 +2,7 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
 
 @Schema({ timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' }, collection: 'posts' })
-export class Post extends Document {
+export class Posts extends Document {
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
   user_id: Types.ObjectId; // Người tạo bài viết
 
@@ -18,21 +18,21 @@ export class Post extends Document {
   @Prop({ type: Number, default: 0, min: 0 })
   total_comment: number; // Tổng số bình luận
 
-  @Prop({ type: Number, default: 0, min: 0 })
+  @Prop({ type: Number, default: 1, min: 0 })
   total_follow: number; // Tổng số người theo dõi bài viết
 
   @Prop({ type: Number, default: 0, min: 0 })
   liked: number; // Số lượt thích
 
-  @Prop({ type: Number, default: 0, min: 0 })
-  dislike: number; // Số lượt không thích
+  // @Prop({ type: Number, default: 0, min: 0 })
+  // dislike: number; // Số lượt không thích
 
   // @Prop({ type: Number, default: 0, min: 0 })
   // share: number; // Số lượt chia sẻ
 
   @Prop({ type: Number, default: 1 })
   status: number; 
-  // 0 = ẩn, 1 = công khai, 2 = chờ duyệt,...
+  // 0 = ẩn, 1 = chờ duyệt, 2 = công khai,...
 
   // @Prop({ type: Number, default: 0 })
   // top: number; 
@@ -50,4 +50,4 @@ export class Post extends Document {
 
 }
 
-export const PostSchema = SchemaFactory.createForClass(Post);
+export const PostSchema = SchemaFactory.createForClass(Posts);
