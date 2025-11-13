@@ -77,7 +77,7 @@ export class ExamQuestion extends Document {
   correct_answers: number[]; // danh sách chỉ số đáp án đúng (nếu gộp nhiều câu)
 
   @Prop({ default: 0 })
-  score_difficult: number; // độ khó của phần này
+  score_difficult?: number; // độ khó của phần này
 
   @Prop({ type: [Number], default: [] })
   scores: number[]; // điểm tương ứng cho từng câu hỏi

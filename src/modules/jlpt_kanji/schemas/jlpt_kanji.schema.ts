@@ -1,49 +1,52 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document } from 'mongoose';
+import { Schema as MongooseSchema } from 'mongoose';
+
+
+interface Example {
+  w: string; // chữ ví dụ
+  m: string; // nghĩa
+  p: string; // phát âm
+}
 
 @Schema({ timestamps: true })
 export class JlptKanji extends Document {
   @Prop({ required: true, unique: true })
-  kanji: string; // VD: "日"
+  kanji: string;
+
+  @Prop({ required: true })
+  mean: string;
 
   @Prop()
-  mean?: string; // VD: "mặt trời; ngày"
+  detail: string;
+
+  @Prop({ type: MongooseSchema.Types.Mixed })
+  example_kun: Record<string, Example[]>;
+
+  @Prop({ type: MongooseSchema.Types.Mixed })
+  example_on: Record<string, Example[]>;
+
+
+  @Prop({ type: [{ w: String, m: String, p: String, h: String }] })
+  examples: Example[];
 
   @Prop()
-  detail?: string; // mô tả chi tiết hoặc nghĩa mở rộng
-
-  @Prop({
-    type: [
-      {
-        w: { type: String }, // ví dụ: "七日"
-        m: { type: String }, // nghĩa: "7 ngày"
-        p: { type: String }, // phát âm: "なのか"
-        h: { type: String }, // Hán Việt: "THẤT NHẬT"
-      },
-    ],
-    default: [],
-  })
-  example: {
-    w: string;
-    m: string;
-    p: string;
-    h: string;
-  }[];
-
-  @Prop({ required: true, enum: ['N5', 'N4', 'N3', 'N2', 'N1'] })
-  level: string; // cấp độ JLPT
+  kun: string;
 
   @Prop()
-  kun?: string; // cách đọc thuần Nhật
+  on: string;
 
   @Prop()
-  on?: string; // cách đọc Hán Nhật
+  stroke_count: string;
 
-  @Prop({ type: Number })
-  freq?: number; // tần suất xuất hiện
+  @Prop({ type: String, enum: ['N5', 'N4', 'N3', 'N2', 'N1'] })
+  level: string;
 
-  @Prop()
-  stroke_count?: string; // số nét viết
+  @Prop({ type: Boolean, default: false })
+  isJlpt: boolean;
+
+  @Prop({ type: Boolean, default: false })
+  isDeleted: boolean;
 }
 
 export const JlptKanjiSchema = SchemaFactory.createForClass(JlptKanji);
