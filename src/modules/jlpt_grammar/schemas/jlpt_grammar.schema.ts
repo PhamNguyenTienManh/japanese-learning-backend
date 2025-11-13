@@ -46,8 +46,17 @@ export class JlptGrammar extends Document {
   @Prop({ required: true })
   title: string; // tiêu đề / mẫu ngữ pháp (VD: "~たことがある")
 
+  @Prop({ required: true })
+  mean: string; // tóm tắt ý nghĩa ngữ pháp
+
   @Prop({ type: [UsageSchema], default: [] })
   usages: Usage[]; // danh sách cách dùng, ví dụ
+
+  @Prop({ type: Boolean, default: false })
+  isJlpt: boolean;
+
+  @Prop({ type: Boolean, default: false })
+  isDeleted: boolean;
 }
 
 export const JlptGrammarSchema = SchemaFactory.createForClass(JlptGrammar);

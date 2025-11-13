@@ -6,8 +6,8 @@ export class ExamPart extends Document {
   @Prop({ type: Types.ObjectId, ref: 'Exam', required: true })
   examId: Types.ObjectId; // Tham chiếu đến bài thi cha
 
-  @Prop({ required: true })
-  name: string; // Tên phần thi (VD: "文字・語彙", "文法", "聴解")
+  @Prop({ required: true, enum: ['Từ vựng', 'Ngữ pháp - Đọc hiểu', 'Thi nghe']})
+  name: string; // Tên phần thi (VD: Từ vựng,Ngữ pháp - Đọc hiểu,Thi nghe)
 
   @Prop({ required: true, min: 1 })
   time: number; // Thời gian làm phần (phút)
