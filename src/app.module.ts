@@ -34,6 +34,9 @@ import { AiChatSessionsModule } from './modules/ai_chat_sessions/ai_chat_session
 import { AuthModule } from './modules/auth/auth.module';
 import { AuthGuard } from './modules/auth/auth.guard';
 import { RolesGuard } from './modules/auth/roles.guard';
+import { CacheModule } from '@nestjs/cache-manager';
+import { redisStore } from 'cache-manager-redis-yet';
+
 
 @Module({
   imports: [
@@ -41,12 +44,25 @@ import { RolesGuard } from './modules/auth/roles.guard';
       isGlobal: true, // biến môi trường có thể dùng toàn cục
     }),
     MongooseModule.forRoot(process.env.MONGO_URI as string),
-    UsersModule, ProfilesModule, TrophiesModule, UserTrophiesModule, UserWordsModule, 
-    SearchHistoryModule, UserStreaksModule, UserStreakHistoryModule, UserNotificationsModule, 
-    JlptKanjiModule, JlptWordModule, JlptGrammarModule, NotebookModule, NotebookItemModule, 
-    FlashcardModule, ExamsModule, ExamsPartModule, ExamQuestionModule, ExamResultsModule, 
-    ExamResultsDetailModule, ExamUserAnswersModule, PostsModule, PostCategoriesModule, CommentsModule, 
-    ParCommentModule, NewsModule, NotificationsModule, AiChatSessionsModule, AuthModule
+    UsersModule, ProfilesModule, TrophiesModule, UserTrophiesModule, UserWordsModule,
+    SearchHistoryModule, UserStreaksModule, UserStreakHistoryModule, UserNotificationsModule,
+    JlptKanjiModule, JlptWordModule, JlptGrammarModule, NotebookModule, NotebookItemModule,
+    FlashcardModule, ExamsModule, ExamsPartModule, ExamQuestionModule, ExamResultsModule,
+    ExamResultsDetailModule, ExamUserAnswersModule, PostsModule, PostCategoriesModule, CommentsModule,
+    ParCommentModule, NewsModule, NotificationsModule, AiChatSessionsModule, AuthModule,
+
+    CacheModule.registerAsync({
+      useFactory: async () => ({
+        store: await redisStore({
+          socket: {
+            host: '127.0.0.1',
+            port: 6379,
+          },
+        }),
+        ttl: 0,
+      }),
+      isGlobal: true,
+    })
   ],
   providers: [
     // Đăng ký guard toàn cục
@@ -60,4 +76,4 @@ import { RolesGuard } from './modules/auth/roles.guard';
     },
   ],
 })
-export class AppModule {}
+export class AppModule { }
