@@ -34,6 +34,8 @@ import { AiChatSessionsModule } from './modules/ai_chat_sessions/ai_chat_session
 import { AuthModule } from './modules/auth/auth.module';
 import { AuthGuard } from './modules/auth/auth.guard';
 import { RolesGuard } from './modules/auth/roles.guard';
+import { UploadModule } from './modules/upload/upload.module';
+import { TextToSpeechModule } from './modules/text_to_speech/text_to_speech.module';
 
 @Module({
   imports: [
@@ -46,7 +48,8 @@ import { RolesGuard } from './modules/auth/roles.guard';
     JlptKanjiModule, JlptWordModule, JlptGrammarModule, NotebookModule, NotebookItemModule, 
     FlashcardModule, ExamsModule, ExamsPartModule, ExamQuestionModule, ExamResultsModule, 
     ExamResultsDetailModule, ExamUserAnswersModule, PostsModule, PostCategoriesModule, CommentsModule, 
-    ParCommentModule, NewsModule, NotificationsModule, AiChatSessionsModule, AuthModule
+    ParCommentModule, NewsModule, NotificationsModule, AiChatSessionsModule, AuthModule, UploadModule,
+    TextToSpeechModule
   ],
   providers: [
     // Đăng ký guard toàn cục

@@ -22,6 +22,7 @@ async function bootstrap() {
   app.useGlobalPipes(new ValidationPipe({
     whitelist: true,
   }));
+  console.log("TEST ENV FFMPEG:", process.env.FFMPEG_PATH);
   await app.listen(process.env.PORT ?? 9090);
 }
 bootstrap();
