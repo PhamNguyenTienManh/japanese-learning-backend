@@ -48,7 +48,11 @@ export class CreateProfileDto {
 
   @IsOptional()
   @IsString()
-  image?: string;
+  image_url?: string;
+
+  @IsOptional()
+  @IsString()
+  image_publicId?: string;
 
   @IsOptional()
   @IsString()
