@@ -2,7 +2,6 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
-
 import { UsersModule } from './modules/users/users.module';
 import { ProfilesModule } from './modules/profiles/profiles.module';
 import { TrophiesModule } from './modules/trophies/trophies.module';
@@ -36,6 +35,9 @@ import { AuthGuard } from './modules/auth/auth.guard';
 import { RolesGuard } from './modules/auth/roles.guard';
 import { UploadModule } from './modules/upload/upload.module';
 import { TextToSpeechModule } from './modules/text_to_speech/text_to_speech.module';
+import { CacheModule } from '@nestjs/cache-manager';
+import { redisStore } from 'cache-manager-redis-yet';
+
 
 @Module({
   imports: [
@@ -43,6 +45,7 @@ import { TextToSpeechModule } from './modules/text_to_speech/text_to_speech.modu
       isGlobal: true, // biến môi trường có thể dùng toàn cục
     }),
     MongooseModule.forRoot(process.env.MONGO_URI as string),
+
     UsersModule, ProfilesModule, TrophiesModule, UserTrophiesModule, UserWordsModule, 
     SearchHistoryModule, UserStreaksModule, UserStreakHistoryModule, UserNotificationsModule, 
     JlptKanjiModule, JlptWordModule, JlptGrammarModule, NotebookModule, NotebookItemModule, 
@@ -50,6 +53,19 @@ import { TextToSpeechModule } from './modules/text_to_speech/text_to_speech.modu
     ExamResultsDetailModule, ExamUserAnswersModule, PostsModule, PostCategoriesModule, CommentsModule, 
     ParCommentModule, NewsModule, NotificationsModule, AiChatSessionsModule, AuthModule, UploadModule,
     TextToSpeechModule
+
+    CacheModule.registerAsync({
+      useFactory: async () => ({
+        store: await redisStore({
+          socket: {
+            host: '127.0.0.1',
+            port: 6379,
+          },
+        }),
+        ttl: 0,
+      }),
+      isGlobal: true,
+    })
   ],
   providers: [
     // Đăng ký guard toàn cục
@@ -63,4 +79,4 @@ import { TextToSpeechModule } from './modules/text_to_speech/text_to_speech.modu
     },
   ],
 })
-export class AppModule {}
+export class AppModule { }
