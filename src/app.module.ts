@@ -45,15 +45,13 @@ import { redisStore } from 'cache-manager-redis-yet';
       isGlobal: true, // biến môi trường có thể dùng toàn cục
     }),
     MongooseModule.forRoot(process.env.MONGO_URI as string),
-
     UsersModule, ProfilesModule, TrophiesModule, UserTrophiesModule, UserWordsModule, 
     SearchHistoryModule, UserStreaksModule, UserStreakHistoryModule, UserNotificationsModule, 
     JlptKanjiModule, JlptWordModule, JlptGrammarModule, NotebookModule, NotebookItemModule, 
     FlashcardModule, ExamsModule, ExamsPartModule, ExamQuestionModule, ExamResultsModule, 
     ExamResultsDetailModule, ExamUserAnswersModule, PostsModule, PostCategoriesModule, CommentsModule, 
     ParCommentModule, NewsModule, NotificationsModule, AiChatSessionsModule, AuthModule, UploadModule,
-    TextToSpeechModule
-
+    TextToSpeechModule,
     CacheModule.registerAsync({
       useFactory: async () => ({
         store: await redisStore({
