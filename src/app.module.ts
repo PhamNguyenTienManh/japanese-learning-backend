@@ -36,6 +36,7 @@ import { AuthGuard } from './modules/auth/auth.guard';
 import { RolesGuard } from './modules/auth/roles.guard';
 import { CacheModule } from '@nestjs/cache-manager';
 import { redisStore } from 'cache-manager-redis-yet';
+import { RedisModule } from './redis.module';
 
 
 @Module({
@@ -50,7 +51,7 @@ import { redisStore } from 'cache-manager-redis-yet';
     FlashcardModule, ExamsModule, ExamsPartModule, ExamQuestionModule, ExamResultsModule,
     ExamResultsDetailModule, ExamUserAnswersModule, PostsModule, PostCategoriesModule, CommentsModule,
     ParCommentModule, NewsModule, NotificationsModule, AiChatSessionsModule, AuthModule,
-
+    RedisModule,
     CacheModule.registerAsync({
       useFactory: async () => ({
         store: await redisStore({
