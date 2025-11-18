@@ -9,10 +9,10 @@ export class NotebookItem extends Document {
   @Prop({ required: true, enum: ['kanji', 'word', 'grammar'] })
   type: string; // loại nội dung
 
-  @Prop({ type: Types.ObjectId, refPath: 'type', default: null })
+  @Prop({ type: Types.ObjectId, refPath: 'type', default: -1 })
   ref_id?: Types.ObjectId | null; 
   // liên kết đến jlpt_kanji / jlpt_word / jlpt_grammar 
-  // hoặc null / -1 nếu là từ do user tự thêm
+  // hoặc null / -1 nếu là do user tự thêm
 
   @Prop()
   notes?: string; // ghi chú của người dùng

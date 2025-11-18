@@ -37,6 +37,7 @@ import { UploadModule } from './modules/upload/upload.module';
 import { TextToSpeechModule } from './modules/text_to_speech/text_to_speech.module';
 import { CacheModule } from '@nestjs/cache-manager';
 import { redisStore } from 'cache-manager-redis-yet';
+import { RedisModule } from './redis.module';
 
 
 @Module({
@@ -45,13 +46,15 @@ import { redisStore } from 'cache-manager-redis-yet';
       isGlobal: true, // biến môi trường có thể dùng toàn cục
     }),
     MongooseModule.forRoot(process.env.MONGO_URI as string),
-    UsersModule, ProfilesModule, TrophiesModule, UserTrophiesModule, UserWordsModule, 
-    SearchHistoryModule, UserStreaksModule, UserStreakHistoryModule, UserNotificationsModule, 
-    JlptKanjiModule, JlptWordModule, JlptGrammarModule, NotebookModule, NotebookItemModule, 
-    FlashcardModule, ExamsModule, ExamsPartModule, ExamQuestionModule, ExamResultsModule, 
-    ExamResultsDetailModule, ExamUserAnswersModule, PostsModule, PostCategoriesModule, CommentsModule, 
-    ParCommentModule, NewsModule, NotificationsModule, AiChatSessionsModule, AuthModule, UploadModule,
+    UsersModule, ProfilesModule, TrophiesModule, UserTrophiesModule, UserWordsModule,
+    SearchHistoryModule, UserStreaksModule, UserStreakHistoryModule, UserNotificationsModule,
+    JlptKanjiModule, JlptWordModule, JlptGrammarModule, NotebookModule, NotebookItemModule,
+    FlashcardModule, ExamsModule, ExamsPartModule, ExamQuestionModule, ExamResultsModule,
+    ExamResultsDetailModule, ExamUserAnswersModule, PostsModule, PostCategoriesModule, CommentsModule,
+    ParCommentModule, NewsModule, NotificationsModule, AiChatSessionsModule, AuthModule,
+    RedisModule, UploadModule,
     TextToSpeechModule, AiChatSessionsModule,
+
     CacheModule.registerAsync({
       useFactory: async () => ({
         store: await redisStore({
