@@ -2,7 +2,6 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
-
 import { UsersModule } from './modules/users/users.module';
 import { ProfilesModule } from './modules/profiles/profiles.module';
 import { TrophiesModule } from './modules/trophies/trophies.module';
@@ -34,6 +33,8 @@ import { AiChatSessionsModule } from './modules/ai_chat_sessions/ai_chat_session
 import { AuthModule } from './modules/auth/auth.module';
 import { AuthGuard } from './modules/auth/auth.guard';
 import { RolesGuard } from './modules/auth/roles.guard';
+import { UploadModule } from './modules/upload/upload.module';
+import { TextToSpeechModule } from './modules/text_to_speech/text_to_speech.module';
 import { CacheModule } from '@nestjs/cache-manager';
 import { redisStore } from 'cache-manager-redis-yet';
 import { RedisModule } from './redis.module';
@@ -51,7 +52,9 @@ import { RedisModule } from './redis.module';
     FlashcardModule, ExamsModule, ExamsPartModule, ExamQuestionModule, ExamResultsModule,
     ExamResultsDetailModule, ExamUserAnswersModule, PostsModule, PostCategoriesModule, CommentsModule,
     ParCommentModule, NewsModule, NotificationsModule, AiChatSessionsModule, AuthModule,
-    RedisModule,
+    RedisModule, UploadModule,
+    TextToSpeechModule, AiChatSessionsModule,
+
     CacheModule.registerAsync({
       useFactory: async () => ({
         store: await redisStore({

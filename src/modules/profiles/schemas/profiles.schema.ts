@@ -11,7 +11,10 @@ export class Profile extends Document {
   name: string;
 
   @Prop()
-  image?: string;
+  image_url?: string;
+
+  @Prop()
+  image_publicId?: string;
 
   @Prop()
   address?: string;

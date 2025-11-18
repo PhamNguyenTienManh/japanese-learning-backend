@@ -28,6 +28,18 @@ export class AIChatSession extends Document {
 
   @Prop({ type: [ChatMessageSchema], default: [] })
   messages: ChatMessage[]; // danh sách tin nhắn
+
+  @Prop({ type: String, default: 'japanese-learning' })
+  topic?: string; // Chủ đề: grammar, vocabulary, conversation, etc.
+
+  @Prop({ type: String, enum: ['N5', 'N4', 'N3', 'N2', 'N1', 'beginner'], default: 'beginner' })
+  level?: string; // Trình độ học viên
+
+  @Prop({ type: Boolean, default: true })
+  isActive?: boolean; // Session còn active không
 }
 
 export const AIChatSessionSchema = SchemaFactory.createForClass(AIChatSession);
+
+AIChatSessionSchema.index({ userId: 1, createdAt: -1 });
+AIChatSessionSchema.index({ isActive: 1, updatedAt: -1 });
