@@ -51,7 +51,7 @@ import { redisStore } from 'cache-manager-redis-yet';
     FlashcardModule, ExamsModule, ExamsPartModule, ExamQuestionModule, ExamResultsModule, 
     ExamResultsDetailModule, ExamUserAnswersModule, PostsModule, PostCategoriesModule, CommentsModule, 
     ParCommentModule, NewsModule, NotificationsModule, AiChatSessionsModule, AuthModule, UploadModule,
-    TextToSpeechModule,
+    TextToSpeechModule, AiChatSessionsModule,
     CacheModule.registerAsync({
       useFactory: async () => ({
         store: await redisStore({
