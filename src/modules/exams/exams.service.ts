@@ -21,9 +21,9 @@ export class ExamsService {
             });
 
             if (existingExam) {
-            throw new BadRequestException(
-                `An exam with title "${data.title}" already exists for level "${data.level}".`,
-            );
+                throw new BadRequestException(
+                    `An exam with title "${data.title}" already exists for level "${data.level}".`,
+                );
             }
 
             // Tạo bài thi mới
@@ -42,11 +42,10 @@ export class ExamsService {
             ];
 
             const partDocs = parts.map(
-            (p) => new this.examPartModel({ ...p, examId: savedExam._id }),
+                (p) => new this.examPartModel({ ...p, examId: savedExam._id }),
             );
 
             await this.examPartModel.insertMany(partDocs);
-
             return savedExam;
         } catch (error) {
             throw new BadRequestException(`Failed to create exam: ${error.message}`);
