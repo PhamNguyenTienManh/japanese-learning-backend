@@ -7,7 +7,7 @@ export class CreateNotebookItemDto {
   notebook_id: string;
 
   @IsEnum(NOTEBOOK_ITEM_TYPES)
-  @IsNotEmpty()
+  @IsOptional()
   type: NotebookItemType;
 
   @IsMongoId()
@@ -19,7 +19,7 @@ export class CreateNotebookItemDto {
   notes?: string;
 
   @IsString()
-  @IsNotEmpty()
+  @IsOptional()
   name: string;
 
   @IsString()
