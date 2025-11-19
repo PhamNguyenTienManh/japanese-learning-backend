@@ -19,14 +19,14 @@ class NewsContent {
   video?: string; // link video (nếu có)
 }
 
-// -------------------------------
-// Subdocument: Thống kê
-// -------------------------------
-@Schema({ _id: false })
-class NewsStatistics {
-  @Prop({ type: Number, default: 0, min: 0 })
-  total_views: number; // tổng lượt xem
-}
+// // -------------------------------
+// // Subdocument: Thống kê
+// // -------------------------------
+// @Schema({ _id: false })
+// class NewsStatistics {
+//   @Prop({ type: Number, default: 0, min: 0 })
+//   total_views: number; // tổng lượt xem
+// }
 
 // -------------------------------
 // Main Schema: News
@@ -45,8 +45,8 @@ export class News extends Document {
   @Prop({ type: NewsContent, required: true })
   content: NewsContent; // nội dung bài viết (văn bản, hình, video...)
 
-  @Prop({ type: NewsStatistics, default: {} })
-  statistics: NewsStatistics; // thống kê lượt xem
+  // @Prop({ type: NewsStatistics, default: {} })
+  // statistics: NewsStatistics; // thống kê lượt xem
 
   @Prop({ type: Number, default: 1 })
   level: number; // cấp độ (ví dụ 1-5 hoặc CEFR A1-C2)

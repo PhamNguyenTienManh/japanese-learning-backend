@@ -22,4 +22,16 @@ export class NotebookItemService {
         const notebookItem = new this.noteBookItemModel(dto)
         return notebookItem.save();
     }
+
+    async update(id: string, dto: CreateNotebookItemDto): Promise<any>{
+        return this.noteBookItemModel.findByIdAndUpdate(
+            id, 
+            dto, 
+            {new: true}
+        );
+    }
+
+    async delete(id: string): Promise<any>{
+        return this.noteBookItemModel.findByIdAndDelete(id);
+    }
 }
