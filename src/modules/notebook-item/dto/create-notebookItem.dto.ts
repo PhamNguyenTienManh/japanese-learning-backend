@@ -1,14 +1,14 @@
 import { IsMongoId, IsNotEmpty, IsString, IsOptional, IsBoolean, IsEnum } from 'class-validator';
 import { Types } from 'mongoose';
 import { Type } from 'class-transformer';
-export const NOTEBOOK_ITEM_TYPES = ['kanji', 'word', 'grammar'] as const;
+export const NOTEBOOK_ITEM_TYPES = ['kanji', 'word', 'grammar', 'other'] as const;
 export type NotebookItemType = typeof NOTEBOOK_ITEM_TYPES[number];
 export class CreateNotebookItemDto {
   notebook_id: string;
 
   @IsEnum(NOTEBOOK_ITEM_TYPES)
   @IsOptional()
-  type: NotebookItemType;
+  type?: NotebookItemType;
 
   @IsMongoId()
   @IsOptional()

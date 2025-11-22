@@ -1,7 +1,7 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, InternalServerErrorException, Logger, NotFoundException } from '@nestjs/common';
 import { Model, Types } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
-import { AIChatSession } from './schemas/ai_chat_sessions.schema';
+import { AIChatSession, ChatMessage } from './schemas/ai_chat_sessions.schema';
 import { CreateMessageDto } from './dto/ai-chat.dto';
 import { ChatAgent } from '../ai/agent/chat.agent';
 
@@ -14,6 +14,8 @@ export class AiChatSessionsService {
     private readonly chatAgent: ChatAgent,
     ) {}
 
+    private readonly logger = new Logger(AiChatSessionsService.name);
+
     async createSession(userId: string) {
         return this.aiChatSessionModel.create({
         userId, // luôn từ token
@@ -22,23 +24,67 @@ export class AiChatSessionsService {
         });
     }
 
-    async sendMessage(sessionId: string, createMessageDto: CreateMessageDto) {
-        const session = await this.aiChatSessionModel.findById(sessionId);
-        if (!session) throw new NotFoundException('Session not found');
-        // add user message
-        session.messages.push({ role: 'user', content: createMessageDto.content, timestamp: new Date() });
-        // call ChatAgent to get AI reply
-        const aiResponse = await this.chatAgent.chatReply(session.messages, createMessageDto.content, { temperature: 0.7 });
-        // save ai response
-        session.messages.push({ role: 'ai', content: aiResponse, timestamp: new Date() });
-        await session.save();
-        return {
-            sessionId: session._id,
-            userMessage: createMessageDto.content,
-            aiMessage: aiResponse,
-            timestamp: new Date(),
-        };
-    }
+   public async sendMessage(
+  sessionId: string,
+  createMessageDto: { content: string },
+  userId: string
+) {
+  this.logger.debug(
+    `sendMessage called with sessionId=${sessionId}, userId=${userId}`
+  );
+
+  // 1. Tìm session
+  const session = await this.aiChatSessionModel.findById(sessionId);
+  if (!session) throw new NotFoundException('Session not found');
+
+  // 2. Check quyền sở hữu
+  if (session.userId?.toString() !== userId) {
+    throw new ForbiddenException('You do not own this session');
+  }
+
+  // 3. Push user message vào session
+  const userMsg: ChatMessage = {
+    role: 'user',
+    content: createMessageDto.content,
+    timestamp: new Date(),
+  };
+  session.messages.push(userMsg);
+
+  try {
+    // 4. GỌI CHAT AGENT — phải có await + gán biến
+    const aiResponse = await this.chatAgent.chatReply(
+      session.messages,         // messages
+      createMessageDto.content, // userMessage
+      sessionId,                // sessionId
+      userId                    // userId
+    );
+
+    // 5. Lưu message AI
+    const aiMsg: ChatMessage = {
+      role: 'ai',
+      content: aiResponse,
+      timestamp: new Date(),
+    };
+    session.messages.push(aiMsg);
+
+    await session.save();
+
+    // 6. Trả kết quả về client
+    return {
+      sessionId: session._id,
+      userMessage: userMsg.content,
+      aiMessage: aiMsg.content,
+      timestamp: new Date(),
+    };
+  } catch (error) {
+    // rollback nếu lỗi
+    session.messages.pop();
+    await session.save();
+
+    this.logger.error('Failed to get AI response', error);
+    throw new InternalServerErrorException('AI service unavailable');
+  }
+}
 
 
     async getSessionHistory(sessionId: string) {

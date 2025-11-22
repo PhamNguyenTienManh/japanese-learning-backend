@@ -13,7 +13,7 @@ export class AiChatSessionsController {
      */
     @Post()
     async createSession(@Req() req: any) {
-        const userId = req.user.userId; // userId đã decode từ JWT
+        const userId = req.user.sub; // userId đã decode từ JWT
         return this.aiChatService.createSession(userId);
     }
 
@@ -21,13 +21,14 @@ export class AiChatSessionsController {
      * POST /ai-chat/:sessionId/message
      * Gửi tin nhắn trong session
      */
-    @Public()
     @Post(':sessionId/message')
     async sendMessage(
         @Param('sessionId') sessionId: string,
         @Body() createMessageDto: CreateMessageDto,
+        @Req() req: any
     ) {
-        return this.aiChatService.sendMessage(sessionId, createMessageDto);
+        const userId = req.user.sub;
+        return this.aiChatService.sendMessage(sessionId, createMessageDto, userId);
     }
 
     /**
