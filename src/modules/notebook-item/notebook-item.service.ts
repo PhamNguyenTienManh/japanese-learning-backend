@@ -16,7 +16,7 @@ export class NotebookItemService {
     ) { }
 
     async create(notebookId: string, dto: CreateNotebookItemDto): Promise<NotebookItem> {
-        const notebook = this.notebookModel.findById(notebookId);
+        const notebook = await this.notebookModel.findById(notebookId);
         if(!notebook) throw new NotFoundException("Notebook not found")
         dto.notebook_id = notebookId
         const notebookItem = new this.noteBookItemModel(dto)

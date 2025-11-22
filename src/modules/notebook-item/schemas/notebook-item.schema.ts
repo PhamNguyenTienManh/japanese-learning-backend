@@ -6,7 +6,7 @@ export class NotebookItem extends Document {
   @Prop({ type: Types.ObjectId, ref: 'Notebook', required: true })
   notebook_id: Types.ObjectId; // tham chiếu đến Notebook
 
-  @Prop({ required: true, enum: ['kanji', 'word', 'grammar'] })
+  @Prop({ required: true, enum: ['kanji', 'word', 'grammar', 'other'] })
   type: string; // loại nội dung
 
   @Prop({ type: Types.ObjectId, refPath: 'type', default: -1 })
