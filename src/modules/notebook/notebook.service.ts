@@ -34,4 +34,11 @@ export class NotebookService {
         return notebook;
 
     }
+
+    async findByUserId(userId: string): Promise<Notebook[]> {
+        if (!userId) throw new Error("userId is required");
+        const notebooks = await this.notebook.find({ user_id: userId }).exec();
+        return notebooks;
+    }
+
 }
