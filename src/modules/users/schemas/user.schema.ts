@@ -1,4 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { IsOptional } from 'class-validator';
 import { Document } from 'mongoose';
 
 @Schema({ timestamps: true })
@@ -6,7 +7,7 @@ export class User extends Document {
   @Prop({ unique: true, required: true })
   email: string;
 
-  @Prop({ required: true })
+  @IsOptional()
   passwordHash: string;
 
   @Prop({ required: true, enum: ['student', 'admin'], default: 'student' })

@@ -5,7 +5,7 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { RegisterDto } from './dto/register.dto';
 import { SignInDto } from './dto/signin.dto';
-import { Types } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { ForgotPasswordDto } from './dto/forgor-password.dto';
@@ -13,6 +13,8 @@ import type { Cache } from 'cache-manager';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import * as nodemailer from 'nodemailer';
 import { VerifyRegisterOtpDto } from './dto/verify-register-otp.dto';
+import { User } from '../users/schemas/user.schema';
+import { InjectModel } from '@nestjs/mongoose';
 
 @Injectable()
 export class AuthService {
@@ -21,8 +23,43 @@ export class AuthService {
     private profilesService: ProfilesService,
     private jwtService: JwtService,
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
+    @InjectModel(User.name) private readonly userModel: Model<User>
 
   ) { }
+
+  async validateGoogleUser(googleUser) {
+    const { email, google_id } = googleUser;
+
+    let user = await this.usersService.findByEmail(email);
+
+    if (!user) {
+      // tạo user mới
+      user = await this.usersService.create({
+        email,
+        provider: 'google',
+        google_id,
+        passwordHash: '',
+      }) as any;
+    }
+
+    return this.generateToken(user);
+  }
+  private async generateToken(user: any): Promise<{ access_token: string }> {
+    const payload = { sub: user._id, email: user.email, role: user.role };
+    const jti = uuidv4();
+    const token = await this.jwtService.signAsync(payload, { jwtid: jti });
+    return { access_token: token };
+  }
+  async findByEmail(mail: string) {
+    return this.userModel.findOne({ email:mail });
+  }
+
+  async create(data) {
+    const user =new this.userModel(data);
+    return user.save();
+  }
+
+
 
   // async register(registerDto: RegisterDto) {
   //   const { email, password } = registerDto;
@@ -177,31 +214,31 @@ export class AuthService {
 
 
   async logout(token: string) {
-  try {
-    const decoded = this.jwtService.decode(token) as any;
-    if (!decoded || !decoded.jti) {
-      throw new BadRequestException('Invalid token');
+    try {
+      const decoded = this.jwtService.decode(token) as any;
+      if (!decoded || !decoded.jti) {
+        throw new BadRequestException('Invalid token');
+      }
+
+      const jti = decoded.jti;
+
+      // Lấy thời gian còn lại của token để set TTL cho blacklist
+      const expiresAt = decoded.exp * 1000;
+      const now = Date.now();
+      const ttl = Math.max(1, Math.floor((expiresAt - now) / 1000)); // giây
+
+      // Đưa token vào blacklist
+      await this.cacheManager.set(
+        `blacklist_${jti}`,
+        true,
+        ttl
+      );
+
+      return { message: 'Logged out successfully' };
+    } catch (err) {
+      throw new BadRequestException('Logout failed');
     }
-
-    const jti = decoded.jti;
-
-    // Lấy thời gian còn lại của token để set TTL cho blacklist
-    const expiresAt = decoded.exp * 1000;
-    const now = Date.now();
-    const ttl = Math.max(1, Math.floor((expiresAt - now) / 1000)); // giây
-
-    // Đưa token vào blacklist
-    await this.cacheManager.set(
-      `blacklist_${jti}`,
-      true,
-      ttl
-    );
-
-    return { message: 'Logged out successfully' };
-  } catch (err) {
-    throw new BadRequestException('Logout failed');
   }
-}
 
 
 }

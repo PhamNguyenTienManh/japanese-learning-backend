@@ -1,4 +1,4 @@
-import { Controller, Post, Body, HttpCode, HttpStatus, UseGuards, Req } from '@nestjs/common';
+import { Controller, Post, Body, HttpCode, HttpStatus, UseGuards, Req, Get } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { Public } from './public.decorator';
 import { RegisterDto } from './dto/register.dto';
@@ -6,7 +6,8 @@ import { SignInDto } from './dto/signin.dto';
 import { ForgotPasswordDto } from './dto/forgor-password.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { VerifyRegisterOtpDto } from './dto/verify-register-otp.dto';
-import { AuthGuard } from './auth.guard';
+import { AuthGuard as JwtAuthGuard } from './auth.guard';
+import { AuthGuard } from '@nestjs/passport';
 
 @Controller('auth')
 export class AuthController {
@@ -43,11 +44,22 @@ export class AuthController {
   }
 
   @Post('logout')
-  @UseGuards(AuthGuard)
+  @UseGuards(JwtAuthGuard)
   async logout(@Req() req) {
     const token = req.headers.authorization?.split(' ')[1];
     return this.authService.logout(token);
   }
 
+  @Get('google')
+  @Public()
+  @UseGuards(AuthGuard('google'))
+  async googleAuth() {}
 
+  // B2: Google redirect lại server
+  @Get('google/callback')
+  @Public()
+  @UseGuards(AuthGuard('google'))
+  async googleCallback(@Req() req) {
+    return this.authService.validateGoogleUser(req.user);
+  }
 }
