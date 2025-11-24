@@ -1,4 +1,4 @@
-import { Body, Controller, Param, Post, Put, } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, Query, } from '@nestjs/common';
 import { PostsService } from './posts.service';
 import { CreatePostDto } from './dto/create-post.dto';
 import { Posts } from './schemas/posts.schema';
@@ -33,6 +33,18 @@ export class PostsController {
     @Public()
     async updateFollow(@Param('id') id: string, @Body('inc') inc: boolean): Promise<Posts> {
         return this.postService.updateFollow(id, inc);
+    }
+
+    @Get()
+    @Public()
+    async getAll(
+        @Query('page') page: string = '1',   
+        @Query('limit') limit: string = '10'
+    ): Promise<{ data: Posts[]; total: number; page: number; limit: number }> {
+        const pageNumber = parseInt(page, 10);
+        const limitNumber = parseInt(limit, 10);
+
+        return this.postService.getAll(pageNumber, limitNumber);
     }
 
 }

@@ -5,6 +5,9 @@ import { UsersModule } from '../users/users.module';
 import { JwtModule } from '@nestjs/jwt';
 import { jwtConstants } from './constants';
 import { ProfilesModule } from '../profiles/profiles.module';
+import { GoogleStrategy } from './strategies/google.strategy';
+import { MongooseModule } from '@nestjs/mongoose';
+import { User, UserSchema } from '../users/schemas/user.schema';
 
 @Module({
   imports: [
@@ -15,9 +18,12 @@ import { ProfilesModule } from '../profiles/profiles.module';
       secret: jwtConstants.secret,
       signOptions: { expiresIn: '2h' },
     }),
+    MongooseModule.forFeature([
+      {name: User.name, schema: UserSchema}
+    ]),
   ],
   controllers: [AuthController],
-  providers: [AuthService],
+  providers: [AuthService, GoogleStrategy],
   exports: [AuthService],
 })
 export class AuthModule {}

@@ -1,15 +1,16 @@
 {
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
+    "@langchain/core": "^0.3.75",
+    "@langchain/google-genai": "^0.2.17",
+    "@langchain/textsplitters": "^0.1.0",
     "@nestjs/cache-manager": "^3.0.1",
     "@nestjs/config": "^4.0.2",
     "@nestjs/jwt": "^11.0.1",
     "@nestjs/mapped-types": "^2.1.0",
     "@nestjs/mongoose": "^11.0.3",
+    "@nestjs/passport": "^11.0.5",
     "@nestjs/platform-express": "^11.1.8",
-    "@langchain/core": "^0.3.75",
-    "@langchain/google-genai": "^0.2.17",
-    "@langchain/textsplitters": "^0.1.0",
     "bcrypt": "^6.0.0",
     "buffer-to-stream": "^1.0.0",
     "cache-manager": "^7.2.4",
@@ -24,6 +25,8 @@
     "multer": "^2.0.2",
     "node-fetch": "^3.3.2",
     "nodemailer": "^7.0.10",
+    "passport": "^0.7.0",
+    "passport-google-oauth20": "^2.0.0",
     "passport-jwt": "^4.0.1",
     "uuid": "^13.0.0",
     "wavefile": "^11.0.0",
@@ -41,6 +44,7 @@
     "@types/ioredis": "^4.28.10",
     "@types/multer": "^2.0.0",
     "@types/node": "^24.10.0",
+    "@types/passport-google-oauth20": "^2.0.17",
     "@types/passport-jwt": "^4.0.1"
   }
 }
