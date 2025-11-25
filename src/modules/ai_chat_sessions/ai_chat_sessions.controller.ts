@@ -45,9 +45,10 @@ export class AiChatSessionsController {
      * GET /ai-chat/user/:userId
      * Lấy tất cả sessions của user
      */
-    @Get('user/:userId')
-    async getUserSessions(@Param('userId') userId: string) {
-        return this.aiChatService.getUserSessions(userId);
+    @Get('user/sessions')
+    async getUserSessions( @Req() req: any) {
+        const userId = req.user.sub;
+        return this.aiChatService.getLastUserSession(userId);
     }
 
     /**

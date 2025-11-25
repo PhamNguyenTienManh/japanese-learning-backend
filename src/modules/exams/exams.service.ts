@@ -2,10 +2,11 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { InjectModel } from '@nestjs/mongoose';
 import { Exam } from './schemas/exams.schema';
 import { ExamPart } from '../exams_part/schema/exams_part.schema';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { CreateExamDto } from './dto/create-exam.dto';
 import { ExamQuestion } from '../exam_question/schemas/exam_question.schema';
 
+ const VALID_LEVELS = ['N5', 'N4', 'N3', 'N2', 'N1'];
 @Injectable()
 export class ExamsService {
     constructor(
@@ -77,5 +78,67 @@ export class ExamsService {
       ...exam,
       parts: partWithQuestions,
     };
+  }
+
+
+  async countExamsByLevel() {
+    const levels = ['N5', 'N4', 'N3', 'N2', 'N1'];
+    const result = {};
+    for (const lv of levels) {
+      const count = await this.examModel.countDocuments({ level: lv });
+      result[lv] = count;
+    }
+    return result;
+  }
+
+
+  async getExamsByLevel(level: string): Promise<Exam[]> {
+    // Check level hợp lệ
+    if (!VALID_LEVELS.includes(level)) {
+      throw new BadRequestException(
+        `Level không hợp lệ. Vui lòng nhập một trong: ${VALID_LEVELS.join(', ')}`
+      );
+    }
+
+    const exams = await this.examModel.find({ level });
+    if (!exams.length) {
+      throw new NotFoundException(`Không tìm thấy đề thi cho level ${level}`);
+    }
+    return exams;
+  }
+
+  async getExamDetailsGroupedByPart(examId: string) {
+    // Kiểm tra examId hợp lệ
+    if (!Types.ObjectId.isValid(examId)) {
+      throw new NotFoundException('Exam ID không hợp lệ');
+    }
+
+    // Lấy tất cả phần của đề thi
+    const objectId = new Types.ObjectId(examId);
+
+    const parts = await this.examPartModel.find({ examId: objectId }).lean();
+    if (!parts.length) {
+      throw new NotFoundException('Không tìm thấy phần thi nào cho đề này');
+    }
+
+
+    // Lấy tất cả câu hỏi thuộc các phần này
+    const partIds = parts.map((p) => p._id);
+    const questions = await this.examQuestionModel.find({ partId: { $in: partIds } }).lean();
+
+    // Gom nhóm theo partId
+    const grouped = parts.map((part) => {
+      const partQuestions = questions.filter((q) => q.partId.toString() === part._id.toString());
+      return {
+        partId: part._id,
+        partName: part.name,
+        time: part.time,
+        min_score: part.min_score,
+        max_score: part.max_score,
+        questions: partQuestions,
+      };
+    });
+
+    return grouped;
   }
 }

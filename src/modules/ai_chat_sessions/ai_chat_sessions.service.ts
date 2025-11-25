@@ -87,18 +87,54 @@ export class AiChatSessionsService {
 }
 
 
-    async getSessionHistory(sessionId: string) {
-        const session = await this.aiChatSessionModel.findById(sessionId);
-        if (!session) throw new NotFoundException('Session not found');
-        return session;
+  async getSessionHistory(sessionId: string) {
+      const session = await this.aiChatSessionModel.findById(sessionId);
+      if (!session) throw new NotFoundException('Session not found');
+      return session;
+  }
+
+  async getUserSessions(userId: string) {
+    if (!userId) return [];
+
+    const query: any = {};
+    if (Types.ObjectId.isValid(userId)) {
+      query.$or = [
+        { userId: new Types.ObjectId(userId) }, // ObjectId
+        { userId: userId }                       // fallback string
+      ];
+    } else {
+      query.userId = userId;
     }
 
-    async getUserSessions(userId: string) {
-        return this.aiChatSessionModel
-        .find({ userId: new Types.ObjectId(userId) })
-        .sort({ updatedAt: -1 })
-        .limit(20);
+    return this.aiChatSessionModel
+      .find(query)
+      .sort({ updatedAt: -1 })
+      .limit(20)
+      .lean();
+  }
+
+  async getLastUserSession(userId: string) {
+    if (!userId) return null;
+
+    const query: any = {};
+    if (Types.ObjectId.isValid(userId)) {
+      query.$or = [
+        { userId: new Types.ObjectId(userId) }, // ObjectId
+        { userId: userId }                       // fallback string
+      ];
+    } else {
+      query.userId = userId;
     }
+
+    const session = await this.aiChatSessionModel
+      .findOne(query)          // findOne sẽ lấy 1 document
+      .sort({ updatedAt: -1 }) // sắp xếp theo cập nhật mới nhất
+      .lean();
+
+    return session || null; // trả về null nếu không tìm thấy
+  }
+
+
 
 
     async getGuestSessions() {

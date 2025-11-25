@@ -8,6 +8,7 @@ export class User extends Document {
   email: string;
 
   @IsOptional()
+  @Prop()
   passwordHash: string;
 
   @Prop({ required: true, enum: ['student', 'admin'], default: 'student' })
