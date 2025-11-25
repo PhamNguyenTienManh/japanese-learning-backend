@@ -146,66 +146,69 @@ export class ChatAgent {
   /**
    * Gửi message tới AI và nhận phản hồi
    */
-  public async chatReply(
-    messages: ChatMessage[],
-    userMessage: string,
-    sessionId: string,
-    userId: string
-  ): Promise<string> {
-    if (!sessionId) {
-      this.logger.error('sessionId is missing');
-      throw new Error('sessionId is required');
-    }
-    if (!userId) {
-      this.logger.error('userId is missing');
-      throw new Error('userId is required');
-    }
-
-    await this.initAgentExecutor();
-
-    const humanMessage = new HumanMessage({ content: userMessage });
-    
-    const payload = { 
-      input: userMessage  // Hoặc có thể dùng object: { content: userMessage }
-    };
-
-    const config = {
-      configurable: {
-        sessionId: sessionId,
-        userId: userId,
-      }
-    };
-
-    this.logger.warn(`[ChatAgent] === CRITICAL DEBUG ===`);
-    this.logger.warn(`  Input userId: ${userId}`);
-    this.logger.warn(`  Input userId type: ${typeof userId}`);
-    this.logger.warn(`  Input sessionId: ${sessionId}`);
-    this.logger.warn(`  Config object: ${JSON.stringify(config, null, 2)}`);
-    this.logger.warn(`  ================================`);
-
-    try {
-      const result = await this.withHistory!.invoke(payload, config);
-
-      this.logger.log(`Agent response received`);
-      this.logger.debug(`Result type: ${typeof result?.output}`);
-
-      // Lấy output - đã là string hoặc AgentFinish
-      const output = result?.output;
-      
-      // Nếu là object phức tạp, extract text content
-      if (typeof output === 'object' && output !== null) {
-        // Có thể là AgentFinish hoặc structure khác
-        const text = output.text || output.content || JSON.stringify(output);
-        return typeof text === 'string' ? text : JSON.stringify(text);
-      }
-      
-      // Nếu đã là string, return luôn
-      return typeof output === 'string' ? output : JSON.stringify(output);
-    } catch (err) {
-      this.logger.error('[ChatAgent] Failed to generate response');
-      this.logger.error('Error:', err.message);
-      this.logger.error('Stack:', err.stack);
-      throw err;
-    }
+    public async chatReply(
+  messages: ChatMessage[],
+  userMessage: string,
+  sessionId: string,
+  userId: string
+): Promise<string> {
+  if (!sessionId) {
+    this.logger.error('sessionId is missing');
+    throw new Error('sessionId is required');
   }
+  if (!userId) {
+    this.logger.error('userId is missing');
+    throw new Error('userId is required');
+  }
+
+  await this.initAgentExecutor();
+
+  // Ép userMessage thành string an toàn
+  const safeInput = typeof userMessage === 'string' ? userMessage : String(userMessage);
+
+  const payload = { input: safeInput };
+  const config = {
+    configurable: {
+      sessionId,
+      userId,
+    },
+  };
+
+  this.logger.warn(`[ChatAgent] === CRITICAL DEBUG ===`);
+  this.logger.warn(`  Input userId: ${userId}`);
+  this.logger.warn(`  Input userId type: ${typeof userId}`);
+  this.logger.warn(`  Input sessionId: ${sessionId}`);
+  this.logger.warn(`  Config object: ${JSON.stringify(config, null, 2)}`);
+  this.logger.warn(`  ================================`);
+
+  try {
+    const result = await this.withHistory!.invoke(payload, config);
+
+    this.logger.log(`Agent response received`);
+    this.logger.debug(`Result type: ${typeof result?.output}`);
+
+    let output = result?.output;
+
+    // Nếu output là mảng object { type, text }, join tất cả text lại
+    if (Array.isArray(output)) {
+      output = output
+        .filter((m: any) => typeof m.text === 'string')
+        .map((m: any) => m.text)
+        .join('\n');
+    }
+    // Nếu output là object, lấy text hoặc content
+    else if (typeof output === 'object' && output !== null) {
+      output = output.text || output.content || JSON.stringify(output);
+    }
+
+    // Trả về string
+    return typeof output === 'string' ? output : JSON.stringify(output);
+  } catch (err) {
+    this.logger.error('[ChatAgent] Failed to generate response');
+    this.logger.error('Error:', err.message);
+    this.logger.error('Stack:', err.stack);
+    throw err;
+  }
+}
+
 }
