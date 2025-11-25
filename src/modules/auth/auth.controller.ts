@@ -1,4 +1,4 @@
-import { Controller, Post, Body, HttpCode, HttpStatus, UseGuards, Req, Get } from '@nestjs/common';
+import { Controller, Post, Body, HttpCode, HttpStatus, UseGuards, Req, Get, Res } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { Public } from './public.decorator';
 import { RegisterDto } from './dto/register.dto';
@@ -55,11 +55,12 @@ export class AuthController {
   @UseGuards(AuthGuard('google'))
   async googleAuth() {}
 
-  // B2: Google redirect lại server
   @Get('google/callback')
   @Public()
   @UseGuards(AuthGuard('google'))
-  async googleCallback(@Req() req) {
-    return this.authService.validateGoogleUser(req.user);
+  async googleCallback(@Req() req, @Res() res) {
+    const data = await this.authService.validateGoogleUser(req.user);
+    const token = data.access_token;
+    return res.redirect(`http://localhost:3000?token=${token}`);
   }
 }

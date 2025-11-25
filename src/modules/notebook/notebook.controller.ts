@@ -1,4 +1,4 @@
-import { Controller, Param, Post, Body, Put } from '@nestjs/common';
+import { Controller, Param, Post, Body, Put, Get, Res, Req, Delete } from '@nestjs/common';
 import { NotebookItemService } from '../notebook-item/notebook-item.service';
 import { CreateNotebookDto } from './dto/create-notebook.dto';
 import { Notebook } from './schemas/notebook.schema';
@@ -11,9 +11,9 @@ export class NotebookController {
         private readonly NotebookService: NotebookService,
     ){}
 
-    @Post(':id')
-    @Public()
-    async create(@Param('id') userId: string, @Body() dto: CreateNotebookDto): Promise<Notebook>{
+    @Post()
+    async create(@Req() req: any, @Body() dto: CreateNotebookDto): Promise<Notebook>{
+        const userId = req.user.sub;
         return this.NotebookService.create(userId, dto)
     }
 
@@ -21,5 +21,15 @@ export class NotebookController {
     @Public()
     async update(@Param('id') id: string, @Body() dto: CreateNotebookDto): Promise<Notebook>{
         return this.NotebookService.update(id, dto)
+    }
+
+    @Get()
+    @Public()
+    async getAll(): Promise<Notebook[]>{
+        return this.NotebookService.getAll();
+    }
+    @Delete(":id")
+    async delete(@Param("id") id: string): Promise<Notebook> {
+        return this.NotebookService.delete(id);
     }
 }

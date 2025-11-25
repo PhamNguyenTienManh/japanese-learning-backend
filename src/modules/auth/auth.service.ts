@@ -15,6 +15,7 @@ import * as nodemailer from 'nodemailer';
 import { VerifyRegisterOtpDto } from './dto/verify-register-otp.dto';
 import { User } from '../users/schemas/user.schema';
 import { InjectModel } from '@nestjs/mongoose';
+import { Profile } from '../profiles/schemas/profiles.schema';
 
 @Injectable()
 export class AuthService {
@@ -23,12 +24,15 @@ export class AuthService {
     private profilesService: ProfilesService,
     private jwtService: JwtService,
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
-    @InjectModel(User.name) private readonly userModel: Model<User>
+    @InjectModel(User.name) private readonly userModel: Model<User>,
+    @InjectModel(Profile.name) private readonly profileModel: Model<Profile>,
 
   ) { }
-
+  async findByUserId(userId: Types.ObjectId) {
+    return this.profileModel.findOne({ userId });
+  }
   async validateGoogleUser(googleUser) {
-    const { email, google_id } = googleUser;
+    const { email, firstName, lastName, picture, google_id} = googleUser;
 
     let user = await this.usersService.findByEmail(email);
 
@@ -41,6 +45,13 @@ export class AuthService {
         passwordHash: '',
       }) as any;
     }
+    let profile = await this.profilesService.findByUserId(user?.id);
+    if (!profile) {
+      profile = await this.profilesService.create({
+        userId: user?.id,
+        name: firstName || email.split('@')[0],
+      });
+    }
 
     return this.generateToken(user);
   }
@@ -51,11 +62,11 @@ export class AuthService {
     return { access_token: token };
   }
   async findByEmail(mail: string) {
-    return this.userModel.findOne({ email:mail });
+    return this.userModel.findOne({ email: mail });
   }
 
   async create(data) {
-    const user =new this.userModel(data);
+    const user = new this.userModel(data);
     return user.save();
   }
 
@@ -161,7 +172,7 @@ export class AuthService {
     }
 
     const payload = { sub: user._id, email: user.email, role: user.role };
-    const jti = uuidv4(); // tạo JWT ID
+    const jti = uuidv4();
     const token = await this.jwtService.signAsync(payload, { jwtid: jti });
 
     return {

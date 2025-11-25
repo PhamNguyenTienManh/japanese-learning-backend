@@ -14,6 +14,7 @@ export class ProfilesService {
 
   // Hàm tạo profile mới
   async create(createProfileDto: CreateProfileDto): Promise<Profile> {
+    createProfileDto.userId = new Types.ObjectId(createProfileDto.userId);
     const profile = new this.profileModel(createProfileDto);
     return profile.save();
   }
