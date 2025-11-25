@@ -22,7 +22,7 @@ export class ContributionService {
     const objectId = new Types.ObjectId(userId)
     const profileId = await this.profileModel.findOne({ userId: objectId }).select("_id")
     if (!profileId) {
-      throw new Error("Profile not found");
+      throw new Error("Profile not found")
     }
     const payload = {
       ...dto,
