@@ -38,6 +38,7 @@ import { TextToSpeechModule } from './modules/text_to_speech/text_to_speech.modu
 import { CacheModule } from '@nestjs/cache-manager';
 import { redisStore } from 'cache-manager-redis-yet';
 import { RedisModule } from './redis.module';
+import { ContributionModule } from './modules/contribution/contribution.module';
 
 
 @Module({
@@ -53,7 +54,7 @@ import { RedisModule } from './redis.module';
     ExamResultsDetailModule, ExamUserAnswersModule, PostsModule, PostCategoriesModule, CommentsModule,
     ParCommentModule, NewsModule, NotificationsModule, AiChatSessionsModule, AuthModule,
     RedisModule, UploadModule,
-    TextToSpeechModule, AiChatSessionsModule,
+    TextToSpeechModule, AiChatSessionsModule, ContributionModule,
 
     CacheModule.registerAsync({
       useFactory: async () => ({
@@ -66,7 +67,8 @@ import { RedisModule } from './redis.module';
         ttl: 0,
       }),
       isGlobal: true,
-    })
+    }),
+
   ],
   providers: [
     // Đăng ký guard toàn cục
