@@ -1,6 +1,12 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
 
+export enum ExamStatus {
+  IN_PROGRESS = 'in_progress',
+  SAVING = 'saving',
+  COMPLETED = 'completed',
+}
+
 @Schema({ timestamps: true, collection: 'exam_results' })
 export class ExamResult extends Document {
   @Prop({ type: Types.ObjectId, ref: 'Exam', required: true })
@@ -26,6 +32,13 @@ export class ExamResult extends Document {
 
   @Prop({ type: [{ type: Types.ObjectId, ref: 'ExamResultDetail' }], default: [] })
   details: Types.ObjectId[]; // Danh sách điểm từng phần (ref đến ExamResultDetail)
+
+  @Prop({
+    type: String,
+    enum: Object.values(ExamStatus),
+    default: ExamStatus.IN_PROGRESS,
+  })
+  status: ExamStatus;
 }
 
 export const ExamResultSchema = SchemaFactory.createForClass(ExamResult);
