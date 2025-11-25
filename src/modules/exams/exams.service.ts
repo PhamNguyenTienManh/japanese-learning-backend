@@ -1,15 +1,17 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Exam } from './schemas/exams.schema';
 import { ExamPart } from '../exams_part/schema/exams_part.schema';
 import { Model } from 'mongoose';
 import { CreateExamDto } from './dto/create-exam.dto';
+import { ExamQuestion } from '../exam_question/schemas/exam_question.schema';
 
 @Injectable()
 export class ExamsService {
     constructor(
         @InjectModel(Exam.name) private examModel: Model<Exam>,
         @InjectModel(ExamPart.name) private examPartModel: Model<ExamPart>,
+        @InjectModel(ExamQuestion.name) private examQuestionModel: Model<ExamQuestion>,
     ) {}
 
     async createExam(data: CreateExamDto): Promise<Exam> {
@@ -52,4 +54,28 @@ export class ExamsService {
         }
     }
 
+
+    // Lấy thông tin chi tiết một bài thi
+  async getExamDetail(examId: string) {
+    const exam = await this.examModel.findById(examId).lean();
+    if (!exam) throw new NotFoundException('Exam not found');
+
+    const parts = await this.examPartModel.find({ examId }).lean();
+
+    // 3. Lấy danh sách ExamQuestion cho từng phần
+    const questions = await this.examQuestionModel
+      .find({ partId: { $in: parts.map((p) => p._id) } })
+      .lean();
+
+    // Gom câu hỏi theo phần
+    const partWithQuestions = parts.map((part) => ({
+      ...part,
+      questions: questions.filter((q) => q.partId.toString() === part._id.toString()),
+    }));
+
+    return {
+      ...exam,
+      parts: partWithQuestions,
+    };
+  }
 }
