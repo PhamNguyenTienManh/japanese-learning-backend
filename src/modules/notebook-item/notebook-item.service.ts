@@ -34,4 +34,9 @@ export class NotebookItemService {
     async delete(id: string): Promise<any>{
         return this.noteBookItemModel.findByIdAndDelete(id);
     }
+
+    async getItemByNotebookId (notebookId: string):Promise<NotebookItem[]>{
+        return this.noteBookItemModel.find({notebook_id: notebookId});
+    }
+
 }
