@@ -41,18 +41,22 @@ export class NotebookService {
         return notebooks;
     }
 
-    async getAll(): Promise<Notebook[]>{
+    async getAll(): Promise<Notebook[]> {
         return this.notebook.find();
     }
 
     async delete(id: string): Promise<Notebook> {
-    const deletedNotebook = await this.notebook.findByIdAndDelete(id).exec();
-    
-    if (!deletedNotebook) {
-      throw new NotFoundException(`Notebook với id ${id} không tồn tại`);
+        const deletedNotebook = await this.notebook.findByIdAndDelete(id).exec();
+
+        if (!deletedNotebook) {
+            throw new NotFoundException(`Notebook với id ${id} không tồn tại`);
+        }
+
+        return deletedNotebook;
     }
 
-    return deletedNotebook;
-  }
+    async getByUserId(userId: string): Promise<Notebook[]>{
+        return this.notebook.find({user_id: userId});
+    }
 
 }

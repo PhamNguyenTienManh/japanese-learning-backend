@@ -18,7 +18,6 @@ export class ContributionService {
   ) { }
 
   async create(userId: string, dto: CreateContributionDto) {
-    console.log(userId);
     const objectId = new Types.ObjectId(userId)
     const profileId = await this.profileModel.findOne({ userId: objectId }).select("_id")
     if (!profileId) {

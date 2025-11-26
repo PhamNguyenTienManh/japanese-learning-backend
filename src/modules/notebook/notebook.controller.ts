@@ -32,4 +32,10 @@ export class NotebookController {
     async delete(@Param("id") id: string): Promise<Notebook> {
         return this.NotebookService.delete(id);
     }
+
+    @Get("/my_notebook")
+    async getByUserId(@Req() req:any):Promise<Notebook[]>{
+        const id= req.user.sub;
+        return this.NotebookService.getByUserId(id);
+    }
 }

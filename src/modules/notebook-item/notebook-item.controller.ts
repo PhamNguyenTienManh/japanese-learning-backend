@@ -1,4 +1,4 @@
-import { Controller, Post, Param, Body, Put, Delete } from '@nestjs/common';
+import { Controller, Post, Param, Body, Put, Delete, Get } from '@nestjs/common';
 import { NotebookItemService } from './notebook-item.service';
 import { Public } from '../auth/public.decorator';
 import { NotebookItem } from './schemas/notebook-item.schema';
@@ -26,5 +26,13 @@ export class NotebookItemController {
     @Public()
     async delete(@Param('id') id: string):Promise<NotebookItem>{
         return this.noteBookItemService.delete(id)
+    }
+
+
+    @Get(":id")
+    @Public()
+    async getItemByNotebookId (@Param('id') id:string): Promise<NotebookItem[]>{
+
+        return this.noteBookItemService.getItemByNotebookId(id);
     }
 }
