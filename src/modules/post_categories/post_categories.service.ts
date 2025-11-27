@@ -37,7 +37,9 @@ export class PostCategoriesService {
 
         return category.save();
     }
-
+    async getAll(): Promise<PostCategory[]>{
+        return this.postCategoryModel.find();
+    }
 
 
 }

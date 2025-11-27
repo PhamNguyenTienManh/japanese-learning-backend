@@ -1,10 +1,11 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
+import { Profile } from 'src/modules/profiles/schemas/profiles.schema';
 
 @Schema({ timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' }, collection: 'posts' })
 export class Posts extends Document {
-  @Prop({ type: Types.ObjectId, ref: 'User', required: true })
-  user_id: Types.ObjectId; // Người tạo bài viết
+  @Prop({ type: Types.ObjectId, ref: Profile.name, required: true })
+  profile_id: Types.ObjectId; // Người tạo bài viết
 
   @Prop({ type: String, required: true, trim: true })
   title: string; // Tiêu đề bài viết
@@ -21,8 +22,8 @@ export class Posts extends Document {
   @Prop({ type: Number, default: 1, min: 0 })
   total_follow: number; // Tổng số người theo dõi bài viết
 
-  @Prop({ type: Number, default: 0, min: 0 })
-  liked: number; // Số lượt thích
+  @Prop()
+  liked: Types.ObjectId[]; // Số lượt thích
 
   // @Prop({ type: Number, default: 0, min: 0 })
   // dislike: number; // Số lượt không thích
