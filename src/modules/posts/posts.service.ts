@@ -22,6 +22,7 @@ export class PostsService {
     ) { }
 
     async create(id: string, dto: CreatePostDto): Promise<Posts> {
+        
         const objectId = new Types.ObjectId(id);
         const profile = await this.profileModel.findOne({ userId: objectId });
         if (!profile) {
@@ -35,6 +36,8 @@ export class PostsService {
     }
 
     async update(id: string, dto: UpdatePostDto): Promise<Posts> {
+        const objectId = new Types.ObjectId(dto.category_id);
+        dto.category_id = objectId;
         const post = await this.postModel.findById(id)
         if (!post) throw new NotFoundException("Post not found")
 
@@ -182,6 +185,11 @@ export class PostsService {
                 totalPages: Math.ceil(total / limit)
             }
         };
+    }
+
+    async deleteOne(postId: string): Promise<Posts | null>{
+        const objectId = new Types.ObjectId(postId);
+        return this.postModel.findByIdAndDelete(objectId);
     }
 
 
