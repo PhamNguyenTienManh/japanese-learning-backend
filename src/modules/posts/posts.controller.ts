@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Put, Query, Req, } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Put, Query, Req, } from '@nestjs/common';
 import { PostsService } from './posts.service';
 import { CreatePostDto } from './dto/create-post.dto';
 import { Posts } from './schemas/posts.schema';
@@ -13,6 +13,8 @@ export class PostsController {
 
     @Post()
     async create(@Req() req: any, @Body() dto: CreatePostDto): Promise<Posts> {
+        console.log("dtoController", dto);
+        
         const id = req?.user.sub;
         return this.postService.create(id, dto);
     }
@@ -78,6 +80,10 @@ export class PostsController {
         return await this.postService.getPostsByCategory(category, page, limit);
     }
 
+    @Delete(":id")
+    async deleteOne(@Param("id") id: string): Promise<Posts|null>{
+        return this.postService.deleteOne(id);
+    }
 
 
 

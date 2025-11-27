@@ -1,4 +1,5 @@
 import { IsString, IsNumber, IsOptional, IsNotEmpty, Max, MaxLength } from "class-validator";
+import { Types } from "mongoose";
 
 export class UpdatePostDto{
     @IsString()
@@ -11,8 +12,7 @@ export class UpdatePostDto{
     @MaxLength(256)
     content: string;
 
-    @IsString()
     @IsNotEmpty()
-    category_id: string;
+    category_id: Types.ObjectId;
 
 }
