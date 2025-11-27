@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Put, Query, } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, Query, Req, } from '@nestjs/common';
 import { PostsService } from './posts.service';
 import { CreatePostDto } from './dto/create-post.dto';
 import { Posts } from './schemas/posts.schema';
@@ -11,9 +11,9 @@ export class PostsController {
         private readonly postService: PostsService
     ) { }
 
-    @Public()
-    @Post(':id')
-    async create(@Param('id') id: string, @Body() dto: CreatePostDto): Promise<Posts> {
+    @Post()
+    async create(@Req() req: any, @Body() dto: CreatePostDto): Promise<Posts> {
+        const id = req?.user.sub;
         return this.postService.create(id, dto);
     }
 
@@ -24,9 +24,9 @@ export class PostsController {
     }
 
     @Put('liked/:id')
-    @Public()
-    async updateLiked(@Param('id') id: string, @Body('inc') inc: boolean): Promise<Posts> {
-        return this.postService.updateLiked(id, inc);
+    async updateLiked(@Param('id') id: string, @Req() req: any): Promise<Posts> {
+        const userId = req.user?.sub;
+        return this.postService.updateLiked(id, userId);
     }
 
     @Put('follow/:id')
@@ -38,7 +38,7 @@ export class PostsController {
     @Get()
     @Public()
     async getAll(
-        @Query('page') page: string = '1',   
+        @Query('page') page: string = '1',
         @Query('limit') limit: string = '10'
     ): Promise<{ data: Posts[]; total: number; page: number; limit: number }> {
         const pageNumber = parseInt(page, 10);
@@ -46,5 +46,39 @@ export class PostsController {
 
         return this.postService.getAll(pageNumber, limitNumber);
     }
+
+    @Get("/post/:id")
+    @Public()
+    async getOne(@Param("id") id: string): Promise<Posts | null> {
+        return this.postService.getOne(id)
+    }
+
+    @Public()
+    @Get("/stats")
+    async getStats(): Promise<any> {
+        return this.postService.getStats();
+    }
+
+    @Get('search')
+    @Public()
+    async searchPosts(
+        @Query('q') q: string,
+        @Query('page') page: number = 1,
+        @Query('limit') limit: number = 5
+    ) {
+        return await this.postService.searchPosts(q, page, limit);
+    }
+
+    @Get()
+    async getPostsByCategory(
+        @Query('category') category: string,
+        @Query('page') page: number = 1,
+        @Query('limit') limit: number = 5
+    ) {
+        return await this.postService.getPostsByCategory(category, page, limit);
+    }
+
+
+
 
 }

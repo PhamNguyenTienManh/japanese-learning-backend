@@ -1,4 +1,4 @@
-import { Body, Controller, Param, Post, Put } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put } from '@nestjs/common';
 import { PostCategoriesService } from './post_categories.service';
 import { createPostCategoryDto } from './dto/create-post-category.dto';
 import { PostCategory } from './schemas/post_categories.shema';
@@ -20,6 +20,10 @@ export class PostCategoriesController {
     async update(@Param('id') id:string, @Body() dto:UpdatePostCategoryDto): Promise<PostCategory>{
         return this.postCategoryService.update(id, dto);
     }
-
+    @Public()
+    @Get()
+    async getAll(): Promise<PostCategory[]>{
+        return this.postCategoryService.getAll();
+    }
 
 }

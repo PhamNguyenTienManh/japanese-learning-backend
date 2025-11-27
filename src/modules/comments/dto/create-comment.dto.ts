@@ -1,14 +1,12 @@
+import { Type } from "@nestjs/passport";
 import { IsNotEmpty, IsOptional, IsString, MaxLength } from "class-validator";
+import { Types } from "mongoose";
 
 export class CreateCommentDto{
 
-    @IsString()
-    @IsNotEmpty()
-    postId: string;
+    postId: Types.ObjectId;
 
-    @IsString()
-    @IsNotEmpty()
-    userId: string;
+    profileId: Types.ObjectId;
 
     @IsString()
     @IsNotEmpty()

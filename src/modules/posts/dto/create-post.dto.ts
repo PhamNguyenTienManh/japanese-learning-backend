@@ -1,7 +1,8 @@
 import { IsString, IsNumber, IsOptional, IsNotEmpty, Max, MaxLength } from "class-validator";
+import { ObjectId, Types } from "mongoose";
 
 export class CreatePostDto{
-    user_id: string;
+    profile_id: Types.ObjectId;
 
     @IsString()
     @IsNotEmpty()
@@ -13,7 +14,6 @@ export class CreatePostDto{
     @MaxLength(256)
     content: string;
 
-    @IsString()
     @IsNotEmpty()
-    category_id: string;
+    category_id: Types.ObjectId;
 }
