@@ -21,11 +21,13 @@ export class ExamResultsController {
       return this.examResultsService.submitExam(body.examResultId, userId);
   }
 
-  // // Xem kết quả chi tiết
-  // @Get(':id')
-  // async getExamResult(@Param('id') examResultId: string): Promise<ExamResult> {
-  //   return this.examResultsService.getExamResult(examResultId);
-  // }
+  // Xem kết quả chi tiết
+  @Get(':id')
+  async getExamResult(@Param('id') examId: string, @Req() req: any) {
+    const userId = req.user.sub; 
+    return this.examResultsService.getResultDetailByExam(examId, userId);
+  }
+
 
   @Get('resume/:examResultId')
   async resume(@Param('examResultId') examResultId: string, @Req() req: any ) {
@@ -33,4 +35,21 @@ export class ExamResultsController {
     return this.examResultsService.resumeExam(examResultId, userId);
   }
 
+  @Get('status/:examId')
+  async checkStatus(
+    @Param('examId') examId: string,
+    @Req() req: any
+  ) {
+    const userId = req.user.sub; // Lấy userId từ JWT
+    return this.examResultsService.checkExamStatus(examId, userId);
+  }
+
+  @Get('comparison/:examId')
+  async getComparison(
+    @Param('examId') examId: string,
+    @Req() req: any
+  ) {
+    const userId = req.user.sub; // Lấy userId từ JWT
+    return this.examResultsService.getExamComparison(examId, userId);
+  }
 }

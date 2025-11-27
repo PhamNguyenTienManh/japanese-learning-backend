@@ -7,6 +7,7 @@ import { ExamPart, ExamPartSchema } from '../exams_part/schema/exams_part.schema
 import { ExamUserAnswer, ExamUserAnswerSchema } from '../exam_user_answers/schemas/exam_user_answers.schema';
 import { Exam, ExamSchema } from '../exams/schemas/exams.schema';
 import { ExamResultDetail, ExamResultDetailSchema } from '../exam_results_detail/schemas/exam_results_detail.schema';
+import { ExamQuestion, ExamQuestionSchema } from '../exam_question/schemas/exam_question.schema';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { ExamResultDetail, ExamResultDetailSchema } from '../exam_results_detail
     MongooseModule.forFeature([{ name: ExamUserAnswer.name, schema: ExamUserAnswerSchema }]),
     MongooseModule.forFeature([{ name: Exam.name, schema: ExamSchema }]),
     MongooseModule.forFeature([{ name: ExamResultDetail.name, schema: ExamResultDetailSchema }]),
+    MongooseModule.forFeature([{ name: ExamQuestion.name, schema: ExamQuestionSchema }]),
   ],
   providers: [ExamResultsService],
   controllers: [ExamResultsController]
