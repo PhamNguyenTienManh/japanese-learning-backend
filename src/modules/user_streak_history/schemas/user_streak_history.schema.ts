@@ -18,6 +18,9 @@ export class UserStreakHistory extends Document {
 
   @Prop({ type: Boolean, default: false })
   is_current: boolean; // true nếu đây là streak hiện tại
+
+  @Prop({ type: Date, required: true })
+  last_active_date: Date; // ngày gần nhất user học
 }
 
 export const UserStreakHistorySchema = SchemaFactory.createForClass(UserStreakHistory);
