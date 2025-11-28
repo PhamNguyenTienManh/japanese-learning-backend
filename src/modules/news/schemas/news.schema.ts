@@ -52,7 +52,7 @@ export class News extends Document {
   level: number; // cấp độ (ví dụ 1-5 hoặc CEFR A1-C2)
 
   @Prop({ type: String, default: '' })
-  grammarlist: string; // danh sách ngữ pháp liên quan (có thể tách sau này)
+  grammarlist:  Map<string, string>[]; 
 
   @Prop({ type: Boolean, default: false })
   publish: boolean; // trạng thái hiển thị bài

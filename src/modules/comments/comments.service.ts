@@ -68,4 +68,8 @@ export class CommentsService {
         return comment;
     }
 
+    async delete(id:string): Promise<Comment | null>{
+        return this.commentModel.findByIdAndDelete(id);
+    }
+
 }
