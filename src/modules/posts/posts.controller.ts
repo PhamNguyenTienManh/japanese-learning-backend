@@ -42,7 +42,7 @@ export class PostsController {
     async getAll(
         @Query('page') page: string = '1',
         @Query('limit') limit: string = '10'
-    ): Promise<{ data: Posts[]; total: number; page: number; limit: number }> {
+    ): Promise<{ data: Posts[]; total: number; page: number; limit: number; totalPage: number }> {
         const pageNumber = parseInt(page, 10);
         const limitNumber = parseInt(limit, 10);
 
@@ -51,7 +51,7 @@ export class PostsController {
 
     @Get("/post/:id")
     @Public()
-    async getOne(@Param("id") id: string): Promise<Posts | null> {
+    async getOne(@Param("id") id: string): Promise<{data: Posts | null, countComment: number}> {
         return this.postService.getOne(id)
     }
 
@@ -71,7 +71,8 @@ export class PostsController {
         return await this.postService.searchPosts(q, page, limit);
     }
 
-    @Get()
+    @Get("category")
+    @Public()
     async getPostsByCategory(
         @Query('category') category: string,
         @Query('page') page: number = 1,
