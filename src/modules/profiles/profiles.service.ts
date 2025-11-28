@@ -4,12 +4,14 @@ import { Model, Types } from 'mongoose';
 import { Profile } from './schemas/profiles.schema';
 import { CreateProfileDto } from './dto/create-profile.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { User } from '../users/schemas/user.schema';
 
 
 @Injectable()
 export class ProfilesService {
   constructor(
     @InjectModel(Profile.name) private profileModel: Model<Profile>,
+    @InjectModel(User.name) private userModel: Model<User>,
   ) {}
 
   // Hàm tạo profile mới
@@ -35,9 +37,18 @@ export class ProfilesService {
   }
 
 
-  async findByUserId(userId: string | Types.ObjectId): Promise<Profile | null> {
+  async findByUserId(userId: string | Types.ObjectId): Promise<any> {
     const id = typeof userId === 'string' ? new Types.ObjectId(userId) : userId;
-    return this.profileModel.findOne({ userId: id }).exec();
+
+    return this.profileModel
+      .findOne({ userId: id })
+      .populate({
+        path: 'userId',
+        model: User.name,
+        select: 'email role status provider',
+      })
+      .exec();
   }
+
 
 }
