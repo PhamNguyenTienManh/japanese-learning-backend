@@ -7,6 +7,7 @@ import { UpdatePostDto } from './dto/update-post.dto';
 import { object } from 'zod';
 import { User } from '../users/schemas/user.schema';
 import { Profile } from '../profiles/schemas/profiles.schema';
+import { Comment } from '../comments/schemas/comments.schema';
 
 @Injectable()
 export class PostsService {
@@ -19,10 +20,13 @@ export class PostsService {
 
         @InjectModel(Profile.name)
         private readonly profileModel: Model<Profile>,
+
+        @InjectModel(Comment.name)
+        private readonly commentModel: Model<Comment>,
     ) { }
 
     async create(id: string, dto: CreatePostDto): Promise<Posts> {
-        
+
         const objectId = new Types.ObjectId(id);
         const profile = await this.profileModel.findOne({ userId: objectId });
         if (!profile) {
@@ -44,9 +48,9 @@ export class PostsService {
         return post.updateOne(dto);
     }
 
-    async updateLiked(id: string, userId:string): Promise<Posts> {
+    async updateLiked(id: string, userId: string): Promise<Posts> {
         const objectId = new Types.ObjectId(userId);
-        
+
         const post = await this.postModel.findById(id);
         if (!post) {
             throw new NotFoundException('post not found');
@@ -78,29 +82,47 @@ export class PostsService {
         return post.updateOne(post);
     }
 
-    async getAll(page: number = 1, limit: number = 10): Promise<{ data: Posts[]; total: number; page: number; limit: number }> {
+    async getAll(page: number = 1, limit: number = 10): Promise<{ data: Posts[]; countComment: any[], total: number; page: number; limit: number; totalPage: number }> {
         const skip = (page - 1) * limit;
-        const [data, total] = await Promise.all([
+        const [data, total, countComment] = await Promise.all([
             this.postModel
                 .find().populate("profile_id")
                 .sort({ created_at: -1 })
                 .skip(skip)
-                .limit(limit)
+                .limit(limit).populate("category_id")
                 .exec(),
-            this.postModel.countDocuments().exec()
+            this.postModel.countDocuments().exec(),
+            this.commentModel.aggregate([
+                {
+                    $group: {
+                        _id: "$postId",
+                        totalComment: { $sum: 1 }
+                    }
+                }
+            ])
         ]);
+        const totalPage = Math.ceil(total / limit);
 
         return {
             data,
+            countComment,
             total,
             page,
-            limit
+            limit,
+            totalPage
         };
     }
 
 
-    async getOne(id: string): Promise<Posts | null> {
-        return this.postModel.findById(id).populate("profile_id");
+    async getOne(id: string): Promise<{ data: Posts | null, countComment: number }> {
+        const objectId = new Types.ObjectId(id);
+        const [data, countComment] = await Promise.all([
+            this.postModel.findById(id).populate("profile_id").populate("category_id", "name"),
+            this.commentModel.countDocuments({ postId: objectId })
+        ])
+        return {
+            data, countComment
+        }
     }
 
     async getStats() {
@@ -113,14 +135,20 @@ export class PostsService {
 
         const like = await this.postModel.aggregate([
             {
+                $project: {
+                    likedCount: { $size: "$liked" }
+                }
+            },
+            {
                 $group: {
                     _id: null,
-                    totalLikes: { $sum: '$liked' }
+                    totalLikes: { $sum: "$likedCount" }
                 }
             }
         ]);
 
         const totalLikes = like[0]?.totalLikes ?? 0;
+
         result.push({ totalLikes });
         result.push({ totalViews: 16 })
         const merged = Object.assign({}, ...result);
@@ -136,58 +164,78 @@ export class PostsService {
             ? { title: { $regex: query, $options: 'i' } }
             : {};
 
-        const [items, total] = await Promise.all([
+        const [items, total, countComment] = await Promise.all([
             this.postModel
                 .find(filter)
                 .skip(skip)
-                .limit(limit)
+                .limit(limit).populate("category_id")
                 .sort({ createdAt: -1 }),
 
-            this.postModel.countDocuments(filter)
+            this.postModel.countDocuments(filter),
+            this.commentModel.aggregate([
+                {
+                    $group: {
+                        _id: "$postId",
+                        totalComment: { $sum: 1 }
+                    }
+                }
+            ])
         ]);
 
         return {
             success: true,
             data: items,
-            pagination: {
-                total,
-                page,
-                limit,
-                totalPages: Math.ceil(total / limit)
-            }
+            countComment: countComment,
+            total,
+            page,
+            limit,
+            totalPage: Math.ceil(total / limit)
+
         };
     }
 
     async getPostsByCategory(category: string, page: number, limit: number) {
+        const objectId = new Types.ObjectId(category)
         const skip = (page - 1) * limit;
 
         const filter = category
-            ? { categoryId: category }  // nhận categoryId từ FE gửi lên
+            ? { category_id: objectId }
             : {};
 
-        const [items, total] = await Promise.all([
+
+        const [items, total, countComment] = await Promise.all([
             this.postModel
                 .find(filter)
                 .skip(skip)
                 .limit(limit)
                 .sort({ createdAt: -1 })
-                .populate('categoryId', 'name'), // chỉ lấy tên category
-            this.postModel.countDocuments(filter)
+                .populate('category_id', 'name')
+                .populate("profile_id", "name image_url"),
+
+            this.postModel.countDocuments(filter),
+            this.commentModel.aggregate([
+                {
+                    $group: {
+                        _id: "$postId",
+                        totalComment: { $sum: 1 }
+                    }
+                }
+            ])
         ]);
 
         return {
             success: true,
             data: items,
-            pagination: {
-                total,
-                page,
-                limit,
-                totalPages: Math.ceil(total / limit)
-            }
+            countComment: countComment,
+            total,
+            page,
+            limit,
+            totalPage: Math.ceil(total / limit)
+
         };
     }
 
-    async deleteOne(postId: string): Promise<Posts | null>{
+    async deleteOne(postId: string): Promise<Posts | null> {
         const objectId = new Types.ObjectId(postId);
         return this.postModel.findByIdAndDelete(objectId);
     }
