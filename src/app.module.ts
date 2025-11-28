@@ -39,6 +39,8 @@ import { CacheModule } from '@nestjs/cache-manager';
 import { redisStore } from 'cache-manager-redis-yet';
 import { RedisModule } from './redis.module';
 import { ContributionModule } from './modules/contribution/contribution.module';
+import { UserStudyDayModule } from './modules/user_study_day/user_study_day.modules';
+import { StatisticModule } from './modules/statistic/statistic.module';
 
 
 @Module({
@@ -54,7 +56,7 @@ import { ContributionModule } from './modules/contribution/contribution.module';
     ExamResultsDetailModule, ExamUserAnswersModule, PostsModule, PostCategoriesModule, CommentsModule,
     ParCommentModule, NewsModule, NotificationsModule, AiChatSessionsModule, AuthModule,
     RedisModule, UploadModule,
-    TextToSpeechModule, AiChatSessionsModule, ContributionModule,
+    TextToSpeechModule, AiChatSessionsModule, ContributionModule, UserStudyDayModule, StatisticModule,
 
     CacheModule.registerAsync({
       useFactory: async () => ({
