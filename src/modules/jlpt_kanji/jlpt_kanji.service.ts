@@ -37,42 +37,40 @@ export class JlptKanjiService {
         return result;
     }
 
-    async getJlptKanjiPaginated(page = 1,limit = 10,level?: string,): 
-        Promise<{
-            data: {
-            kanji: string;
-            mean: string;
-            }[];
-            total: number;
-            totalPages: number;
-            currentPage: number;
-        }> 
-    {
+    async getJlptKanjiPaginated(
+        page = 1,
+        limit = 10,
+        level?: string,
+        ) {
         try {
-            const query: any = { };
-            if (level) {
-                query.level = level;
-            }
-
+            const query: any = {};
+            if (level) query.level = level;
             const skip = (page - 1) * limit;
-
             const [data, total] = await Promise.all([
-                this.jlptKanjiModel
-                .find(query, { kanji: 1, mean: 1 })
+            this.jlptKanjiModel
+                .find(query, { kanji: 1, mean: 1, kun: 1, on: 1 })
                 .skip(skip)
                 .limit(limit)
-                .lean(), // lean() giúp lấy plain object thay vì mongoose document
-                this.jlptKanjiModel.countDocuments(query),
+                .lean(),
+
+            this.jlptKanjiModel.countDocuments(query),
             ]);
 
+            const formatted = data.map(k => ({
+                kanji: k.kanji,
+                mean: k.mean,
+                reading: `${k.kun || ""} ${k.on || ""}`.trim(), 
+            }));
+
             return {
-                data,
+                data: formatted,
                 total,
                 totalPages: Math.ceil(total / limit),
                 currentPage: page,
             };
         } catch (error) {
-        throw new BadRequestException(`Failed to get JLPT kanji: ${error.message}`);
+            throw new BadRequestException(`Failed to get JLPT kanji: ${error.message}`,);
         }
     }
+
 }
