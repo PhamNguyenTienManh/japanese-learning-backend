@@ -1,6 +1,4 @@
 import { IsMongoId, IsNotEmpty, IsString, IsOptional, IsBoolean, IsEnum } from 'class-validator';
-import { Types } from 'mongoose';
-import { Type } from 'class-transformer';
 export const NOTEBOOK_ITEM_TYPES = ['kanji', 'word', 'grammar', 'other'] as const;
 export type NotebookItemType = typeof NOTEBOOK_ITEM_TYPES[number];
 export class CreateNotebookItemDto {

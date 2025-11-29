@@ -1,7 +1,7 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { NotebookItem } from './schemas/notebook-item.schema';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { CreateNotebookItemDto } from './dto/create-notebookItem.dto';
 import { Notebook } from '../notebook/schemas/notebook.schema';
 
@@ -17,11 +17,23 @@ export class NotebookItemService {
 
     async create(notebookId: string, dto: CreateNotebookItemDto): Promise<NotebookItem> {
         const notebook = await this.notebookModel.findById(notebookId);
-        if(!notebook) throw new NotFoundException("Notebook not found")
-        dto.notebook_id = notebookId
-        const notebookItem = new this.noteBookItemModel(dto)
+        if (!notebook) throw new NotFoundException("Notebook not found");
+
+        const existed = await this.noteBookItemModel.findOne({
+            notebook_id: notebookId,
+            name: dto.name,
+            type: dto.type,
+        });
+
+        if (existed) {
+            throw new BadRequestException("Từ này đã có trong sổ tay");
+        }
+
+        dto.notebook_id = notebookId;
+        const notebookItem = new this.noteBookItemModel(dto);
         return notebookItem.save();
     }
+
 
     async update(id: string, dto: CreateNotebookItemDto): Promise<any>{
         return this.noteBookItemModel.findByIdAndUpdate(
