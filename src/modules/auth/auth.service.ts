@@ -170,6 +170,7 @@ export class AuthService {
     if (!isMatch) {
       throw new UnauthorizedException('Invalid credentials');
     }
+    if(user.status === "banned") throw new UnauthorizedException("Your account is banned")
 
     const payload = { sub: user._id, email: user.email, role: user.role };
     const jti = uuidv4();
