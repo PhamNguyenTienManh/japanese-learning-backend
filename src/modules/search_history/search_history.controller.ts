@@ -1,7 +1,7 @@
-import { Body, Controller, Get, Inject, Param, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Param, Post, Query } from '@nestjs/common';
 import { SearchHistoryService } from './search_history.service'
 import { Public } from '../auth/public.decorator';
-import { IsString,IsNotEmpty } from 'class-validator';
+import { IsString, IsNotEmpty } from 'class-validator';
 
 class dto {
     @IsString()
@@ -14,8 +14,11 @@ export class SearchHistoryController {
         private readonly searchHistory: SearchHistoryService,
     ) { }
     @Post('user/:userId')
-    @Public()
     async saveSearch(@Param('userId') userId: string, @Body() dto: dto) {
+        console.log("userIdController", userId);
+
+        console.log("dtoquery", dto);
+
         if (!dto.query) {
             return { message: 'Query dto is required' };
         }
@@ -30,7 +33,6 @@ export class SearchHistoryController {
     }
 
 
-    @Public()
     @Get('user/:userId')
     async getHistory(@Param('userId') userId: string) {
         const history = await this.searchHistory.getSearchHistory(userId);
@@ -42,4 +44,15 @@ export class SearchHistoryController {
             message: history.length > 0 ? `Retrieved ${history.length} recent search dtos.` : 'No search history found.'
         };
     }
+
+    @Delete('user/:userId')
+    async deleteTerm(
+        @Param('userId') userId: string,
+        @Query('term') term: string
+    ) {
+        console.log("term", term);
+        await this.searchHistory.deleteSearchTerm(userId, term);
+        return { message: 'Deleted search term successfully' };
+    }
+
 }
