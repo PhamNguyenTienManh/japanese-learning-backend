@@ -14,7 +14,7 @@ export class User extends Document {
   @Prop({ required: true, enum: ['student', 'admin'], default: 'student' })
   role: string;
 
-  @Prop({ required: true, enum: ['active', 'locked'], default: 'active' })
+  @Prop({ required: true, enum: ['active', 'banned'], default: 'active' })
   status: string;
 
   @Prop()
@@ -34,6 +34,7 @@ export class User extends Document {
 
   @Prop()
   google_id?: string;
+
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);
