@@ -59,7 +59,6 @@ export class UsersService {
     
     if (!user) return null;
     
-    // Lấy profile của user
     const profile = await this.profileModel
       .findOne({ userId: user._id })
       .exec();
@@ -85,7 +84,6 @@ export class UsersService {
     
     if (!user) return null;
     
-    // Lấy profile của user
     const profile = await this.profileModel
       .findOne({ userId: user._id })
       .exec();
