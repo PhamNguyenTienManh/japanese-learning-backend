@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
 import { ExamsService } from './exams.service';
 import { Public } from '../auth/public.decorator';
 import { CreateExamDto } from './dto/create-exam.dto';
@@ -30,5 +30,14 @@ export class ExamsController {
     @Get(':id')
     async getExamDetail(@Param('id') id: string) {
         return this.examService.getExamDetailsGroupedByPart(id);
+    }
+
+    @Public()
+    @Patch(':id')
+    async updateExam(
+        @Param('id') id: string,
+        @Body() updateExamDto: Partial<CreateExamDto>
+    ) {
+        return this.examService.updateExam(id, updateExamDto);
     }
 }
