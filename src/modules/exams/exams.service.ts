@@ -138,38 +138,153 @@ export class ExamsService {
     return exams;
   }
 
-  async getExamDetailsGroupedByPart(examId: string) {
-    // Kiểm tra examId hợp lệ
-    if (!Types.ObjectId.isValid(examId)) {
-      throw new NotFoundException('Exam ID không hợp lệ');
-    }
+  // async getExamDetailsGroupedByPart(examId: string) {
+  //   // Kiểm tra examId hợp lệ
+  //   if (!Types.ObjectId.isValid(examId)) {
+  //     throw new NotFoundException('Exam ID không hợp lệ');
+  //   }
 
-    // Lấy tất cả phần của đề thi
-    const objectId = new Types.ObjectId(examId);
+  //   // Lấy tất cả phần của đề thi
+  //   const objectId = new Types.ObjectId(examId);
 
-    const parts = await this.examPartModel.find({ examId: objectId }).lean();
-    if (!parts.length) {
-      throw new NotFoundException('Không tìm thấy phần thi nào cho đề này');
-    }
+  //   const parts = await this.examPartModel.find({ examId: objectId }).lean();
+  //   if (!parts.length) {
+  //     throw new NotFoundException('Không tìm thấy phần thi nào cho đề này');
+  //   }
 
 
-    // Lấy tất cả câu hỏi thuộc các phần này
-    const partIds = parts.map((p) => p._id);
-    const questions = await this.examQuestionModel.find({ partId: { $in: partIds } }).lean();
+  //   // Lấy tất cả câu hỏi thuộc các phần này
+  //   const partIds = parts.map((p) => p._id);
+  //   const questions = await this.examQuestionModel.find({ partId: { $in: partIds } }).lean();
 
-    // Gom nhóm theo partId
-    const grouped = parts.map((part) => {
-      const partQuestions = questions.filter((q) => q.partId.toString() === part._id.toString());
+  //   // Gom nhóm theo partId
+  //   const grouped = parts.map((part) => {
+  //     const partQuestions = questions.filter((q) => q.partId.toString() === part._id.toString());
+  //     return {
+  //       partId: part._id,
+  //       partName: part.name,
+  //       time: part.time,
+  //       min_score: part.min_score,
+  //       max_score: part.max_score,
+  //       questions: partQuestions,
+  //     };
+  //   });
+
+  //   return grouped;
+  // }
+
+    async getExamDetailsGroupedByPart(examId: string) { 
+      if (!Types.ObjectId.isValid(examId)) {
+        throw new NotFoundException('Exam ID không hợp lệ');
+      }
+
+      const objectId = new Types.ObjectId(examId);
+
+      const exam = await this.examModel.findById(objectId).lean();
+      if (!exam) {
+        throw new NotFoundException('Không tìm thấy đề thi');
+      }
+
+      const parts = await this.examPartModel.find({ examId: objectId }).lean();
+      if (!parts.length) {
+        throw new NotFoundException('Không tìm thấy phần thi nào cho đề này');
+      }
+
+      const partIds = parts.map((p) => p._id);
+      const questions = await this.examQuestionModel
+        .find({ partId: { $in: partIds } })
+        .lean();
+
+      const groupedParts = parts.map((part) => {
+        const partQuestions = questions.filter(
+          (q) => q.partId.toString() === part._id.toString(),
+        );
+
+        return {
+          partId: part._id,
+          partName: part.name,
+          time: part.time,
+          min_score: part.min_score,
+          max_score: part.max_score,
+          questions: partQuestions,
+        };
+      });
+
       return {
-        partId: part._id,
-        partName: part.name,
-        time: part.time,
-        min_score: part.min_score,
-        max_score: part.max_score,
-        questions: partQuestions,
-      };
-    });
+        exam: {
+          id: exam._id,
+          title: exam.title,
+          level: exam.level,
+          score: exam.score,
+          pass_score: exam.pass_score,
+          status: exam.status,
+        },
 
-    return grouped;
+        parts: groupedParts,
+      };
+    }
+
+
+  async updateExam(examId: string, data: Partial<CreateExamDto>): Promise<any> {
+    try {
+      if (!Types.ObjectId.isValid(examId)) {
+        throw new BadRequestException('Invalid examId');
+      }
+
+      // Check exam exists
+      const existingExam = await this.examModel.findById(examId);
+      if (!existingExam) {
+        throw new NotFoundException('Exam not found');
+      }
+
+      // Check duplicate title + level (ignore current exam)
+      if (data.title || data.level) {
+        const duplicate = await this.examModel.findOne({
+          _id: { $ne: examId },
+          title: data.title ?? existingExam.title,
+          level: data.level ?? existingExam.level,
+        });
+
+        if (duplicate) {
+          throw new BadRequestException(
+            `Another exam with title "${data.title ?? existingExam.title}" already exists for level "${data.level ?? existingExam.level}".`,
+          );
+        }
+      }
+
+      // Auto pass-score by level
+      const levelPassScore = {
+        N5: 80,
+        N4: 90,
+        N3: 95,
+        N2: 90,
+        N1: 100,
+      };
+
+      const newPassScore =
+        data.pass_score ??
+        levelPassScore[data.level ?? existingExam.level] ??
+        existingExam.pass_score;
+
+      // Prepare updated data
+      const updatePayload = {
+        ...data,
+        pass_score: newPassScore,
+      };
+
+      // Update exam
+      const updated = await this.examModel.findByIdAndUpdate(
+        examId,
+        { $set: updatePayload },
+        { new: true },
+      );
+
+      return {
+        message: 'Exam updated successfully',
+        exam: updated,
+      };
+    } catch (error) {
+      throw new BadRequestException(`Failed to update exam: ${error.message}`);
+    }
   }
 }
