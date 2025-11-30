@@ -1,3 +1,4 @@
+
 import { 
   Controller, 
   Get, 
@@ -11,7 +12,7 @@ import { UsersService } from './users.service';
 import { UpdateStatusDto, UpdateRoleDto } from './dto/update-user.dto';
 import { Roles } from '../auth/roles.decorator';
 
-@Controller('users')
+@Controller("users")
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
@@ -25,6 +26,7 @@ export class UsersController {
       };
     
     }
+
 
   @Get(':id')
   async findOne(@Param('id') id: string) {
@@ -94,5 +96,6 @@ export class UsersController {
         error.status || HttpStatus.INTERNAL_SERVER_ERROR
       );
     }
+
   }
 }
