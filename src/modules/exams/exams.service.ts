@@ -15,45 +15,67 @@ export class ExamsService {
         @InjectModel(ExamQuestion.name) private examQuestionModel: Model<ExamQuestion>,
     ) {}
 
-    async createExam(data: CreateExamDto): Promise<Exam> {
-        try {
-            // Kiểm tra trùng tên theo level
-            const existingExam = await this.examModel.findOne({
-                title: data.title,
-                level: data.level,
-            });
+    async createExam(data: CreateExamDto): Promise<any> {
+      try {
+          // Check trùng tên theo level
+          const existingExam = await this.examModel.findOne({
+              title: data.title,
+              level: data.level,
+          });
 
-            if (existingExam) {
-                throw new BadRequestException(
-                    `An exam with title "${data.title}" already exists for level "${data.level}".`,
-                );
-            }
+          if (existingExam) {
+              throw new BadRequestException(
+                  `An exam with title "${data.title}" already exists for level "${data.level}".`,
+              );
+          }
 
-            // Tạo bài thi mới
-            const exam = new this.examModel({
-                ...data,
-                score: data.score ?? 180,
-                pass_score: data.pass_score ?? 80,
-            });
-            const savedExam = await exam.save();
+          // Auto pass_score theo cấp độ
+          const levelPassScore = {
+              N5: 80,
+              N4: 90,
+              N3: 95,
+              N2: 90,
+              N1: 100,
+          };
 
-            // Tạo 3 phần thi mặc định
-            const parts = [
-            { name: 'Từ vựng', time: 20, min_score: 19, max_score: 40 },
-            { name: 'Ngữ pháp - Đọc hiểu', time: 40, min_score: 19, max_score: 80 },
-            { name: 'Thi nghe', time: 30, min_score: 19, max_score: 60 },
-            ];
+          const passScore = data.pass_score ?? levelPassScore[data.level] ?? 80;
 
-            const partDocs = parts.map(
-                (p) => new this.examPartModel({ ...p, examId: savedExam._id }),
-            );
+          // Tạo exam
+          const exam = new this.examModel({
+              ...data,
+              score: 180,
+              pass_score: passScore,
+          });
 
-            await this.examPartModel.insertMany(partDocs);
-            return savedExam;
-        } catch (error) {
-            throw new BadRequestException(`Failed to create exam: ${error.message}`);
-        }
+          const savedExam = await exam.save();
+
+          // Tạo 3 phần thi mặc định
+          const parts = [
+              { name: 'Từ vựng', time: 20, min_score: 19, max_score: 40 },
+              { name: 'Ngữ pháp - Đọc hiểu', time: 40, min_score: 19, max_score: 80 },
+              { name: 'Thi nghe', time: 30, min_score: 19, max_score: 60 },
+          ];
+
+          const partDocs = parts.map(
+              (p) => new this.examPartModel({ ...p, examId: savedExam._id }),
+          );
+
+          const createdParts = await this.examPartModel.insertMany(partDocs);
+
+          // Trả về exam + partId
+          return {
+              exam: savedExam,
+              parts: createdParts.map(p => ({
+                  id: p._id,
+                  name: p.name,
+              })),
+          };
+
+      } catch (error) {
+          throw new BadRequestException(`Failed to create exam: ${error.message}`);
+      }
     }
+
 
 
     // Lấy thông tin chi tiết một bài thi
@@ -93,17 +115,26 @@ export class ExamsService {
 
 
   async getExamsByLevel(level: string): Promise<Exam[]> {
-    // Check level hợp lệ
+    // Nếu level = "all" → lấy hết
+    if (level === "all") {
+      const exams = await this.examModel.find({});
+      return exams;
+    }
+
+    // Các level hợp lệ
     if (!VALID_LEVELS.includes(level)) {
       throw new BadRequestException(
-        `Level không hợp lệ. Vui lòng nhập một trong: ${VALID_LEVELS.join(', ')}`
+        `Level không hợp lệ. Vui lòng nhập một trong: ${VALID_LEVELS.join(', ')} hoặc 'all'`
       );
     }
 
+    // Filter theo level
     const exams = await this.examModel.find({ level });
+
     if (!exams.length) {
       throw new NotFoundException(`Không tìm thấy đề thi cho level ${level}`);
     }
+
     return exams;
   }
 
