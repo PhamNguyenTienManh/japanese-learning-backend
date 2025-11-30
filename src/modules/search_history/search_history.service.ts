@@ -9,6 +9,10 @@ export class SearchHistoryService {
   ) {}
 
   async saveSearchTerm(userId: string, searchTerm: string) {
+    console.log("userId", userId);
+    
+    console.log("searchTerm", searchTerm);
+    
     
     const key = `user:${userId}:search_history`;
     const term = searchTerm.trim().toLowerCase();
@@ -23,5 +27,10 @@ export class SearchHistoryService {
 
   async getSearchHistory(userId: string) {
     return await this.redisClient.lrange(`user:${userId}:search_history`, 0, 4);
+  }
+  async deleteSearchTerm(userId: string, searchTerm: string) {
+    const key = `user:${userId}:search_history`;
+    const term = searchTerm.trim().toLowerCase();
+    await this.redisClient.lrem(key, 0, term);
   }
 }

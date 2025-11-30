@@ -19,9 +19,7 @@ export class TextToSpeechController {
 
     // Trả về URL để client sử dụng
     return {
-      success: true,
       audioUrl: audioUrl,
-      message: 'Audio generated successfully'
     };
   }
 
