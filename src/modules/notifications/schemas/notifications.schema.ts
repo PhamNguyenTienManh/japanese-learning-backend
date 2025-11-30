@@ -1,26 +1,34 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
+import { Posts } from 'src/modules/posts/schemas/posts.schema';
 
 @Schema({ timestamps: true, collection: 'notifications' })
 export class Notification extends Document {
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
-  userId: Types.ObjectId; // người nhận thông báo
+  userId: Types.ObjectId;
 
-  @Prop({
-    type: String,
-    enum: ['comment', 'event', 'exam', 'article'],
-    required: true,
-  })
-  type: string; // loại thông báo
+  @Prop({ type: Types.ObjectId, ref: 'User', required: true })
+  fromProfileId: Types.ObjectId;
+
+  // // Loại thông báo
+  // @Prop({
+  //   type: String,
+  //   enum: ['comment', 'like', 'event', 'exam', 'article'],
+  //   required: true,
+  // })
+  // type: string;
+
+  @Prop({ type: Types.ObjectId, ref: Posts.name })
+  targetId: Types.ObjectId;
 
   @Prop({ type: String, required: true })
-  title: string; // tiêu đề ngắn gọn của thông báo
+  title: string;
 
   @Prop({ type: String, required: true })
-  message: string; // nội dung chính
+  message: string;
 
   @Prop({ type: Boolean, default: false })
-  isRead: boolean; // đã đọc hay chưa
+  isRead: boolean;
 }
 
 export const NotificationSchema = SchemaFactory.createForClass(Notification);
