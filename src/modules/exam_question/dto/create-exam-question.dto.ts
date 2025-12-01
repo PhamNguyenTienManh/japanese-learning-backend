@@ -1,5 +1,14 @@
-import { IsArray, IsNotEmpty, IsOptional, IsString, Max, Min, ValidateNested } from 'class-validator';
-import { Type } from 'class-transformer';
+import {
+  IsArray,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+  ValidateNested,
+} from "class-validator";
+import { Type } from "class-transformer";
 
 class GeneralInfoDto {
   @IsOptional()
@@ -50,6 +59,11 @@ class QuestionContentDto {
   @IsOptional()
   @IsString()
   explainAll?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  score?: number; // điểm cho câu hỏi
 }
 
 export class CreateExamQuestionDto {

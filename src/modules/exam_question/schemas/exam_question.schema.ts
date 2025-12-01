@@ -1,5 +1,5 @@
-import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Prop, Schema, SchemaFactory } from "@nestjs/mongoose";
+import { Document, Types } from "mongoose";
 
 // -----------------------------------
 // Subdocument: General (thông tin chung của phần thi)
@@ -15,7 +15,10 @@ export class GeneralInfo {
   @Prop()
   txt_read?: string; // đoạn đọc hoặc bài đọc (nếu có)
 
-  @Prop({ type: [{ audio_time: { type: Number, default: null } }], default: [] })
+  @Prop({
+    type: [{ audio_time: { type: Number, default: null } }],
+    default: [],
+  })
   audios?: { audio_time: number | null }[]; // danh sách audio kèm thời gian
 }
 
@@ -43,16 +46,20 @@ export class QuestionContent {
 
   @Prop()
   explainAll?: string; // lời giải chi tiết
+
+  @Prop({ default: 0 })
+  score?: number; // điểm cho câu hỏi này
 }
 
-export const QuestionContentSchema = SchemaFactory.createForClass(QuestionContent);
+export const QuestionContentSchema =
+  SchemaFactory.createForClass(QuestionContent);
 
 // -----------------------------------
 // Main Schema: ExamQuestion
 // -----------------------------------
 @Schema({ timestamps: true })
 export class ExamQuestion extends Document {
-  @Prop({ type: Types.ObjectId, ref: 'ExamPart', required: true })
+  @Prop({ type: Types.ObjectId, ref: "ExamPart", required: true })
   partId: Types.ObjectId; // liên kết đến phần thi
 
   @Prop({ required: true })

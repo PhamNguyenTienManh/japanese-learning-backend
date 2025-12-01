@@ -1,5 +1,5 @@
-import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document } from 'mongoose';
+import { Prop, Schema, SchemaFactory } from "@nestjs/mongoose";
+import { Document } from "mongoose";
 
 // -------------------------------
 // Subdocument: Nội dung bài viết
@@ -31,7 +31,7 @@ class NewsContent {
 // -------------------------------
 // Main Schema: News
 // -------------------------------
-@Schema({ timestamps: true, collection: 'news' })
+@Schema({ timestamps: true, collection: "news" })
 export class News extends Document {
   @Prop({ type: String, required: true, trim: true })
   title: string; // tiêu đề bài viết
@@ -39,7 +39,7 @@ export class News extends Document {
   @Prop({ type: String, required: true })
   link: string; // link bài viết gốc (VD: forbes, bbc, v.v.)
 
-  @Prop({ type: String, enum: ['easy', 'medium', 'hard'], default: 'easy' })
+  @Prop({ type: String, enum: ["easy", "medium", "hard"], default: "easy" })
   type: string; // độ khó bài đọc
 
   @Prop({ type: NewsContent, required: true })
@@ -49,10 +49,10 @@ export class News extends Document {
   // statistics: NewsStatistics; // thống kê lượt xem
 
   @Prop({ type: Number, default: 1 })
-  level: number; // cấp độ (ví dụ 1-5 hoặc CEFR A1-C2)
+  level: number; // cấp độ
 
-  @Prop({ type: String, default: '' })
-  grammarlist:  Map<string, string>[]; 
+  @Prop({ type: String, default: "" })
+  grammarlist: Map<string, string>[];
 
   @Prop({ type: Boolean, default: false })
   publish: boolean; // trạng thái hiển thị bài
