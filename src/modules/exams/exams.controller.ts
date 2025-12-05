@@ -3,12 +3,13 @@ import { ExamsService } from "./exams.service";
 import { Public } from "../auth/public.decorator";
 import { CreateExamDto } from "./dto/create-exam.dto";
 import { UpdateExamDto } from "./dto/update_exam.dto";
+import { Roles } from "../auth/roles.decorator";
 
 @Controller("exams")
 export class ExamsController {
   constructor(private readonly examService: ExamsService) {}
 
-  @Public()
+  @Roles("admin")
   @Post()
   async createExam(@Body() createExamDto: CreateExamDto) {
     return this.examService.createExam(createExamDto);
@@ -33,7 +34,7 @@ export class ExamsController {
     return this.examService.getExamDetailsGroupedByPart(id);
   }
 
-  @Public()
+  @Roles("admin")
   @Patch(":id")
   async updateExam(
     @Param("id") id: string,
