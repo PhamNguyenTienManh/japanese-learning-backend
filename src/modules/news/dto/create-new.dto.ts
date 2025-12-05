@@ -6,8 +6,8 @@ import {
   IsBoolean,
   IsNumber,
   ValidateNested,
-} from 'class-validator';
-import { Type } from 'class-transformer';
+} from "class-validator";
+import { Type } from "class-transformer";
 
 export class CreateNewsContentDto {
   @IsOptional()
@@ -36,9 +36,9 @@ export class CreateNewsDto {
   @IsNotEmpty()
   link: string;
 
-  @IsEnum(['easy', 'medium', 'hard'])
+  @IsEnum(["easy", "medium", "hard"])
   @IsOptional()
-  type?: string = 'easy';
+  type?: string = "easy";
 
   @ValidateNested()
   @Type(() => CreateNewsContentDto)
@@ -50,11 +50,11 @@ export class CreateNewsDto {
 
   @IsString()
   @IsOptional()
-  grammarlist?: string = '';
+  grammarlist?: string = "";
 
   @IsBoolean()
   @IsOptional()
-  publish?: boolean = false;
+  published?: boolean = false;
 
   @IsOptional()
   dateField?: Date = new Date();

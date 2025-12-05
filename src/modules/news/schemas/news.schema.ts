@@ -55,7 +55,7 @@ export class News extends Document {
   grammarlist: Map<string, string>[];
 
   @Prop({ type: Boolean, default: false })
-  publish: boolean; // trạng thái hiển thị bài
+  published: boolean; // trạng thái hiển thị bài
 
   @Prop({ type: Date, default: Date.now })
   dateField: Date; // ngày hiển thị bài

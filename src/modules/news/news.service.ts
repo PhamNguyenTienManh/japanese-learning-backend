@@ -33,19 +33,22 @@ export class NewsService {
 
       const updatePayload: any = { ...data };
 
-      // tránh cập nhật 1 field mất các field còn lại
+      // Merge content object
       if (data.content) {
         updatePayload.content = {
-          ...existing.content,
-          ...data.content,
+          audio: data.content.audio ?? existing.content.audio,
+          image: data.content.image ?? existing.content.image,
+          textbody: data.content.textbody ?? existing.content.textbody,
+          video: data.content.video ?? existing.content.video,
         };
       }
 
       const updated = await this.newsModel.findByIdAndUpdate(
         id,
-        { $set: updatePayload },
+        updatePayload,
         { new: true }
       );
+
       return {
         news: updated,
       };
