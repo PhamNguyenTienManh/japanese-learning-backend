@@ -13,7 +13,7 @@ export class Posts extends Document {
   @Prop({ type: String, required: true })
   content: string; // Nội dung bài viết
 
-  @Prop({ type: Types.ObjectId, ref: 'PostCategory',  required: true })
+  @Prop({ type: Types.ObjectId, ref: 'PostCategory', required: true })
   category_id: Types.ObjectId; // Danh mục bài viết
 
   @Prop({ type: Number, default: 0, min: 0 })
@@ -32,15 +32,18 @@ export class Posts extends Document {
   // share: number; // Số lượt chia sẻ
 
   @Prop({ type: Number, default: 1 })
-  status: number; 
+  status: number;
   // 0 = ẩn, 1 = chờ duyệt, 2 = công khai,...
 
   // @Prop({ type: Number, default: 0 })
   // top: number; 
   // // 1 nếu bài viết được ghim/trending, 0 là bình thường
 
-  // @Prop({ type: String })
-  // image?: string; // Ảnh thumbnail (nếu có)
+  @Prop({ type: String, default: null })
+  image_url: string | null;
+
+  @Prop({ type: String, default: null })
+  image_publicId: string | null;
 
   // @Prop({ type: String })
   // link?: string; // Link đính kèm (nếu bài viết chia sẻ tài liệu ngoài)
