@@ -41,7 +41,11 @@ import { RedisModule } from "./redis.module";
 import { ContributionModule } from "./modules/contribution/contribution.module";
 import { UserStudyDayModule } from "./modules/user_study_day/user_study_day.modules";
 import { StatisticModule } from "./modules/statistic/statistic.module";
+
 import { TranslateModule } from "./modules/translate/translate.module";
+
+import { PdfModule } from "./modules/pdf/pdf.module";
+
 
 @Module({
   imports: [
@@ -86,6 +90,8 @@ import { TranslateModule } from "./modules/translate/translate.module";
     UserStudyDayModule,
     StatisticModule,
     TranslateModule,
+    PdfModule,
+
     CacheModule.registerAsync({
       useFactory: async () => ({
         store: await redisStore({

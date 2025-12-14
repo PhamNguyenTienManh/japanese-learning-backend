@@ -8,6 +8,7 @@ import { object } from 'zod';
 import { User } from '../users/schemas/user.schema';
 import { Profile } from '../profiles/schemas/profiles.schema';
 import { Comment } from '../comments/schemas/comments.schema';
+import { UploadService } from '../upload/upload.service';
 
 @Injectable()
 export class PostsService {
@@ -23,10 +24,11 @@ export class PostsService {
 
         @InjectModel(Comment.name)
         private readonly commentModel: Model<Comment>,
+
+        private readonly uploadService: UploadService,
     ) { }
 
     async create(id: string, dto: CreatePostDto): Promise<Posts> {
-
         const objectId = new Types.ObjectId(id);
         const profile = await this.profileModel.findOne({ userId: objectId });
         if (!profile) {
@@ -35,15 +37,38 @@ export class PostsService {
 
         dto.profile_id = profile._id as Types.ObjectId;
         dto.category_id = typeof dto.category_id === 'string' ? new Types.ObjectId(dto.category_id) : dto.category_id;
+        
         const post = new this.postModel(dto);
         return post.save();
     }
 
     async update(id: string, dto: UpdatePostDto): Promise<Posts> {
-        const objectId = new Types.ObjectId(dto.category_id);
-        dto.category_id = objectId;
-        const post = await this.postModel.findById(id)
-        if (!post) throw new NotFoundException("Post not found")
+        const post = await this.postModel.findById(id);
+        if (!post) throw new NotFoundException("Post not found");
+
+        // Nếu có category_id trong dto, convert sang ObjectId
+        if (dto.category_id) {
+            dto.category_id = typeof dto.category_id === 'string' 
+                ? new Types.ObjectId(dto.category_id) 
+                : dto.category_id;
+        }
+
+        // Xử lý xóa ảnh cũ nếu ảnh mới được upload hoặc ảnh bị xóa
+        if (dto.image_url === null && post.image_publicId) {
+            // User muốn xóa ảnh
+            try {
+                await this.uploadService.deleteImage(post.image_publicId);
+            } catch (error) {
+                console.error('Failed to delete old image:', error);
+            }
+        } else if (dto.image_url && dto.image_publicId && post.image_publicId && dto.image_publicId !== post.image_publicId) {
+            // Ảnh mới được upload, xóa ảnh cũ
+            try {
+                await this.uploadService.deleteImage(post.image_publicId);
+            } catch (error) {
+                console.error('Failed to delete old image:', error);
+            }
+        }
 
         return post.updateOne(dto);
     }
@@ -71,7 +96,6 @@ export class PostsService {
 
         return post.save();
     }
-
 
     async updateFollow(id: string, inc: boolean): Promise<Posts> {
         const post = await this.postModel.findById(id)
@@ -113,7 +137,6 @@ export class PostsService {
         };
     }
 
-
     async getOne(id: string): Promise<{ data: Posts | null, countComment: number }> {
         const objectId = new Types.ObjectId(id);
         const [data, countComment] = await Promise.all([
@@ -154,7 +177,6 @@ export class PostsService {
         const merged = Object.assign({}, ...result);
 
         return merged;
-
     }
 
     async searchPosts(query: string, page: number, limit: number) {
@@ -190,7 +212,6 @@ export class PostsService {
             page,
             limit,
             totalPage: Math.ceil(total / limit)
-
         };
     }
 
@@ -201,7 +222,6 @@ export class PostsService {
         const filter = category
             ? { category_id: objectId }
             : {};
-
 
         const [items, total, countComment] = await Promise.all([
             this.postModel
@@ -231,14 +251,22 @@ export class PostsService {
             page,
             limit,
             totalPage: Math.ceil(total / limit)
-
         };
     }
 
     async deleteOne(postId: string): Promise<Posts | null> {
         const objectId = new Types.ObjectId(postId);
+        const post = await this.postModel.findById(objectId);
+        
+        // Xóa ảnh trên Cloudinary nếu có
+        if (post?.image_publicId) {
+            try {
+                await this.uploadService.deleteImage(post.image_publicId);
+            } catch (error) {
+                console.error('Failed to delete image from Cloudinary:', error);
+            }
+        }
+        
         return this.postModel.findByIdAndDelete(objectId);
     }
-
-
 }
