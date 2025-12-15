@@ -3,11 +3,13 @@ import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 import { ValidationPipe } from '@nestjs/common';
+import * as bodyParser from 'body-parser';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-
+  app.use(bodyParser.urlencoded({ extended: true }));
+  app.use(bodyParser.json());
   // Đặt prefix cho tất cả route
   app.setGlobalPrefix('api');
   

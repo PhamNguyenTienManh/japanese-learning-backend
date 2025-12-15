@@ -45,6 +45,7 @@ import { StatisticModule } from "./modules/statistic/statistic.module";
 import { TranslateModule } from "./modules/translate/translate.module";
 
 import { PdfModule } from "./modules/pdf/pdf.module";
+import { KantanModule } from "./modules/kantan/kantan.module";
 
 
 @Module({
@@ -91,6 +92,7 @@ import { PdfModule } from "./modules/pdf/pdf.module";
     StatisticModule,
     TranslateModule,
     PdfModule,
+    KantanModule,
 
     CacheModule.registerAsync({
       useFactory: async () => ({
