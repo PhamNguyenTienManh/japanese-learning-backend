@@ -7,10 +7,11 @@ import Redis from 'ioredis';
     {
       provide: 'REDIS_CLIENT',
       useFactory: () => {
-        return new Redis({
-          host: '127.0.0.1',
-          port: 6379,
-        });
+        if (!process.env.REDIS_URL) {
+          throw new Error('REDIS_URL is not defined');
+        }
+
+        return new Redis(process.env.REDIS_URL);
       },
     },
   ],

@@ -95,17 +95,21 @@ import { KantanModule } from "./modules/kantan/kantan.module";
     KantanModule,
 
     CacheModule.registerAsync({
-      useFactory: async () => ({
-        store: await redisStore({
-          socket: {
-            host: "127.0.0.1",
-            port: 6379,
-          },
-        }),
-        ttl: 0,
-      }),
+      useFactory: async () => {
+        if (!process.env.REDIS_URL) {
+          throw new Error('REDIS_URL is not defined');
+        }
+
+        return {
+          store: await redisStore({
+            url: process.env.REDIS_URL,
+          }),
+          ttl: 0,
+        };
+      },
       isGlobal: true,
     }),
+
   ],
   providers: [
     // Đăng ký guard toàn cục
@@ -119,4 +123,4 @@ import { KantanModule } from "./modules/kantan/kantan.module";
     },
   ],
 })
-export class AppModule {}
+export class AppModule { }
