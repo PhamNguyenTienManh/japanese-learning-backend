@@ -2,7 +2,8 @@ import { Injectable, Logger } from "@nestjs/common";
 import * as fs from "fs-extra";
 import * as Handlebars from "handlebars";
 import * as path from "path";
-import * as puppeteer from "puppeteer";
+import puppeteer from "puppeteer-core";
+import chromium from "@sparticuz/chromium";
 
 @Injectable()
 export class PdfService {
@@ -124,15 +125,27 @@ export class PdfService {
 
     const html = tpl({ words: enriched });
 
-    const browser = await puppeteer.launch({
-      executablePath: puppeteer.executablePath(),
-      headless: "new" as any,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-      ],
-    });
+    const isProduction = process.env.NODE_ENV === "production";
 
+    const browser = await puppeteer.launch(
+      isProduction
+        ? {
+          // ===== Render / Server =====
+          args: [
+            ...chromium.args,
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+          ],
+          executablePath: await chromium.executablePath(),
+          headless: true,
+        }
+        : {
+          // ===== Local Windows / macOS =====
+          executablePath:
+          "C:/Program Files/Google/Chrome/Application/chrome.exe",
+          headless: true,
+        }
+    );
 
 
     try {
