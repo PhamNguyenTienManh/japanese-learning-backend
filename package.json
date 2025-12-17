@@ -43,7 +43,7 @@
     "start": "nest start --watch",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
-    "build": "npx nest build",
+    "build": "./node_modules/.bin/nest build",
     "seed:word": "ts-node src/seed.ts word",
     "seed:grammar": "ts-node src/seed.ts grammar",
     "seed:kanji": "ts-node src/seed.ts kanji",
