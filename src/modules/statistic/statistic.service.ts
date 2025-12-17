@@ -1,10 +1,16 @@
-import { Injectable } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
-import { UserStreakHistory } from '../user_streak_history/schemas/user_streak_history.schema';
-import { UserStudyDay } from '../user_study_day/schemas/user_study_day.schema';
-import { ExamResult } from '../exam_results/schemas/exam_results.schema';
-import { Profile } from '../profiles/schemas/profiles.schema';
+import { Injectable, InternalServerErrorException } from "@nestjs/common";
+import { InjectModel } from "@nestjs/mongoose";
+import { Model, Types } from "mongoose";
+import { UserStreakHistory } from "../user_streak_history/schemas/user_streak_history.schema";
+import { UserStudyDay } from "../user_study_day/schemas/user_study_day.schema";
+import { ExamResult } from "../exam_results/schemas/exam_results.schema";
+import { Profile } from "../profiles/schemas/profiles.schema";
+import { JlptKanji } from "../jlpt_kanji/schemas/jlpt_kanji.schema";
+import { JlptWord } from "../jlpt_word/schemas/jlpt_word.schema";
+import { JlptGrammar } from "../jlpt_grammar/schemas/jlpt_grammar.schema";
+import { News } from "../news/schemas/news.schema";
+import { Posts } from "../posts/schemas/posts.schema";
+import { Exam } from "../exams/schemas/exams.schema";
 
 interface ProfileLean {
   userId: Types.ObjectId;
@@ -28,6 +34,24 @@ export class StatisticService {
 
     @InjectModel(Profile.name)
     private profileModel: Model<Profile>,
+
+    @InjectModel(JlptKanji.name)
+    private jlptKanjiModel: Model<JlptKanji>,
+
+    @InjectModel(JlptWord.name)
+    private jlptWordModel: Model<JlptWord>,
+
+    @InjectModel(JlptGrammar.name)
+    private jlptGrammarModel: Model<JlptGrammar>,
+
+    @InjectModel(News.name)
+    private newsModel: Model<News>,
+
+    @InjectModel(Posts.name)
+    private postsModel: Model<Posts>,
+
+    @InjectModel(Exam.name)
+    private examModel: Model<Exam>
   ) {}
 
   async getUserStatistics(userId: string) {
@@ -38,19 +62,19 @@ export class StatisticService {
       .findOne({ userId: objectId })
       .lean<ProfileLean>();
 
-    if (!profile) throw new Error('Profile not found');
-    
+    if (!profile) throw new Error("Profile not found");
+
     // Tổng số ngày học
-    const studyDaysCount = await this.studyDayModel.countDocuments({ 
-      user_id: userId  //
+    const studyDaysCount = await this.studyDayModel.countDocuments({
+      user_id: userId, //
     });
 
     // Chuỗi hiện tại & dài nhất
     const streaks = await this.streakModel
-      .find({ user_id: userId })  //
+      .find({ user_id: userId }) //
       .sort({ streak_count: -1 });
-    
-    const currentStreak = streaks.find(s => s.is_current)?.streak_count || 0;
+
+    const currentStreak = streaks.find((s) => s.is_current)?.streak_count || 0;
     const longestStreak = streaks.length > 0 ? streaks[0].streak_count : 0;
 
     // Tổng thời gian học tuần này
@@ -66,24 +90,29 @@ export class StatisticService {
     endOfWeek.setHours(23, 59, 59, 999);
 
     const weekRecords = await this.studyDayModel.find({
-      user_id: userId, 
+      user_id: userId,
       date: { $gte: startOfWeek, $lte: endOfWeek },
     });
-    
+
     const totalStudyTimePerWeek = weekRecords.reduce(
-      (sum, r) => sum + r.duration_minutes, 
+      (sum, r) => sum + r.duration_minutes,
       0
     );
 
-    
     const examResults = await this.examResultModel.find({
       userId: objectId,
-      status: 'completed',
+      status: "completed",
     });
-    
+
     const testsCompleted = examResults.length;
-    const averageScore = testsCompleted > 0
-        ? parseFloat((examResults.reduce((sum, r) => sum + r.total_score, 0) / testsCompleted).toFixed(2))
+    const averageScore =
+      testsCompleted > 0
+        ? parseFloat(
+            (
+              examResults.reduce((sum, r) => sum + r.total_score, 0) /
+              testsCompleted
+            ).toFixed(2)
+          )
         : 0;
 
     // Số lượng từ, kanji học (tạm mock)
@@ -91,8 +120,8 @@ export class StatisticService {
     const kanjiLearned = 0;
 
     return {
-      name: profile.name || '',
-      avatar: profile.image_url || '/current-user.jpg',
+      name: profile.name || "",
+      avatar: profile.image_url || "/current-user.jpg",
       joinedDate: profile.createdAt || null,
       stats: {
         studyDays: studyDaysCount,
@@ -105,5 +134,42 @@ export class StatisticService {
         averageScore,
       },
     };
+  }
+
+  async getStatistics() {
+    try {
+      const [
+        profileNumber,
+        jlptKanjiNumber,
+        jlptWordNumber,
+        jlptGrammarNumber,
+        newsNumber,
+        postsNumber,
+        examNumber,
+      ] = await Promise.all([
+        this.profileModel.countDocuments(),
+        this.jlptKanjiModel.countDocuments(),
+        this.jlptWordModel.countDocuments(),
+        this.jlptGrammarModel.countDocuments(),
+        this.newsModel.countDocuments(),
+        this.postsModel.countDocuments(),
+        this.examModel.countDocuments(),
+      ]);
+
+      return {
+        profileNumber,
+        jlptNumber: jlptKanjiNumber + jlptWordNumber + jlptGrammarNumber,
+        newsNumber,
+        postsNumber,
+        examNumber,
+        jlpt: {
+          kanji: jlptKanjiNumber,
+          word: jlptWordNumber,
+          grammar: jlptGrammarNumber,
+        },
+      };
+    } catch (error) {
+      throw new InternalServerErrorException("Failed to get statistics");
+    }
   }
 }
