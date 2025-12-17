@@ -43,14 +43,14 @@
     "start": "nest start --watch",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
-    "build": "nest build",
+    "build": "npx nest build",
     "seed:word": "ts-node src/seed.ts word",
     "seed:grammar": "ts-node src/seed.ts grammar",
     "seed:kanji": "ts-node src/seed.ts kanji",
     "start:prod": "node dist/main.js"
   },
   "devDependencies": {
-    "@nestjs/cli": "^11.0.10",
+    "@nestjs/cli": "^11.0.14",
     "@types/bcrypt": "^6.0.0",
     "@types/cheerio": "^0.22.35",
     "@types/ioredis": "^4.28.10",
