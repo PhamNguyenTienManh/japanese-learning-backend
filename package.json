@@ -30,6 +30,7 @@
     "multer": "^2.0.2",
     "nestjs-seeder": "^0.3.2",
     "node-fetch": "^3.3.2",
+    "puppeteer": "^24.33.0",
     "nodemailer": "^7.0.10",
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",
@@ -47,7 +48,8 @@
     "seed:word": "ts-node src/seed.ts word",
     "seed:grammar": "ts-node src/seed.ts grammar",
     "seed:kanji": "ts-node src/seed.ts kanji",
-    "postinstall": "npx puppeteer browsers install chrome"
+    "postinstall": "npx puppeteer browsers install chrome",
+    "start:prod": "node dist/main.js"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.10",
