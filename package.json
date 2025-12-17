@@ -8,6 +8,7 @@
     "@nestjs/cache-manager": "^3.0.1",
     "@nestjs/config": "^4.0.2",
     "@nestjs/jwt": "^11.0.1",
+    "@nestjs/cli": "^11.0.14",
     "@nestjs/mapped-types": "^2.1.0",
     "@nestjs/mongoose": "^11.0.3",
     "@nestjs/passport": "^11.0.5",
@@ -50,7 +51,6 @@
     "start:prod": "node dist/main.js"
   },
   "devDependencies": {
-    "@nestjs/cli": "^11.0.14",
     "@types/bcrypt": "^6.0.0",
     "@types/cheerio": "^0.22.35",
     "@types/ioredis": "^4.28.10",
