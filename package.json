@@ -43,7 +43,7 @@
   "scripts": {
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc",
     "start": "node dist/main.js",
     "seed:word": "ts-node src/seed.ts word",
     "seed:grammar": "ts-node src/seed.ts grammar",
