@@ -8,7 +8,6 @@
     "@nestjs/cache-manager": "^3.0.1",
     "@nestjs/config": "^4.0.2",
     "@nestjs/jwt": "^11.0.1",
-    "@nestjs/cli": "^11.0.14",
     "@nestjs/mapped-types": "^2.1.0",
     "@nestjs/mongoose": "^11.0.3",
     "@nestjs/passport": "^11.0.5",
@@ -44,13 +43,14 @@
     "start": "nest start --watch",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
-    "build": "./node_modules/.bin/nest build",
+    "build": "nest build",
     "seed:word": "ts-node src/seed.ts word",
     "seed:grammar": "ts-node src/seed.ts grammar",
     "seed:kanji": "ts-node src/seed.ts kanji",
     "start:prod": "node dist/main.js"
   },
   "devDependencies": {
+    "@nestjs/cli": "^11.0.10",
     "@types/bcrypt": "^6.0.0",
     "@types/cheerio": "^0.22.35",
     "@types/ioredis": "^4.28.10",
