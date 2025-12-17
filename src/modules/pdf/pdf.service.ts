@@ -9,7 +9,7 @@ export class PdfService {
   private readonly logger = new Logger(PdfService.name);
   private templatesCache = new Map<string, Handlebars.TemplateDelegate>();
 
-  constructor() {}
+  constructor() { }
 
   private charToHexFileName(char: string): string {
     const code = char.codePointAt(0);
@@ -125,9 +125,15 @@ export class PdfService {
     const html = tpl({ words: enriched });
 
     const browser = await puppeteer.launch({
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
-      headless: true,
+      executablePath: puppeteer.executablePath(),
+      headless: "new" as any,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+      ],
     });
+
+
 
     try {
       const page = await browser.newPage();
