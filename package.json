@@ -46,7 +46,8 @@
     "build": "nest build",
     "seed:word": "ts-node src/seed.ts word",
     "seed:grammar": "ts-node src/seed.ts grammar",
-    "seed:kanji": "ts-node src/seed.ts kanji"
+    "seed:kanji": "ts-node src/seed.ts kanji",
+    "postinstall": "npx puppeteer browsers install chrome"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.10",
