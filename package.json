@@ -48,6 +48,7 @@
     "seed:word": "ts-node src/seed.ts word",
     "seed:grammar": "ts-node src/seed.ts grammar",
     "seed:kanji": "ts-node src/seed.ts kanji",
+    "postinstall": "npx puppeteer browsers install chrome",
     "start:prod": "node dist/main.js"
   },
   "devDependencies": {
