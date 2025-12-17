@@ -12,7 +12,6 @@
     "@nestjs/mongoose": "^11.0.3",
     "@nestjs/passport": "^11.0.5",
     "@nestjs/platform-express": "^11.1.8",
-    "@sparticuz/chromium": "^143.0.0",
     "axios": "^1.13.2",
     "bcrypt": "^6.0.0",
     "buffer-to-stream": "^1.0.0",
@@ -35,23 +34,23 @@
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",
     "passport-jwt": "^4.0.1",
-    "puppeteer-core": "^24.33.0",
+    "puppeteer": "^24.33.0",
     "uuid": "^13.0.0",
     "wavefile": "^11.0.0",
     "zod": "^4.1.12"
   },
   "scripts": {
+    "start": "nest start --watch",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
-    "build": "tsc",
-    "start": "node dist/main.js",
+    "build": "nest build",
     "seed:word": "ts-node src/seed.ts word",
     "seed:grammar": "ts-node src/seed.ts grammar",
     "seed:kanji": "ts-node src/seed.ts kanji",
-    "start:prod": "node dist/main.js"
+    "postinstall": "npx puppeteer browsers install chrome"
   },
   "devDependencies": {
-    "@nestjs/cli": "^11.0.14",
+    "@nestjs/cli": "^11.0.10",
     "@types/bcrypt": "^6.0.0",
     "@types/cheerio": "^0.22.35",
     "@types/ioredis": "^4.28.10",
