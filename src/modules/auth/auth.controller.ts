@@ -61,6 +61,6 @@ export class AuthController {
   async googleCallback(@Req() req, @Res() res) {
     const data = await this.authService.validateGoogleUser(req.user);
     const token = data.access_token;
-    return res.redirect(`http://localhost:3000?token=${token}`);
+    return res.redirect(`https://japanese-learning-frontend-sigma.vercel.app?token=${token}`);
   }
 }
