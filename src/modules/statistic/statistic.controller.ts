@@ -1,6 +1,7 @@
 import { Controller, Get, Req } from "@nestjs/common";
 import { StatisticService } from "./statistic.service";
 import { Public } from "../auth/public.decorator";
+import { Roles } from "../auth/roles.decorator";
 
 @Controller("statistic")
 export class StatisticController {
@@ -13,7 +14,7 @@ export class StatisticController {
   }
 
   @Get()
-  @Public()
+  @Roles("admin")
   async getStats() {
     return this.statisticService.getStatistics();
   }
