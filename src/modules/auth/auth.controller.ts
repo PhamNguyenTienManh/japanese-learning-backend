@@ -53,7 +53,7 @@ export class AuthController {
   @Get('google')
   @Public()
   @UseGuards(AuthGuard('google'))
-  async googleAuth() {}
+  async googleAuth() { }
 
   @Get('google/callback')
   @Public()
@@ -61,6 +61,8 @@ export class AuthController {
   async googleCallback(@Req() req, @Res() res) {
     const data = await this.authService.validateGoogleUser(req.user);
     const token = data.access_token;
-    return res.redirect(`https://japanese-learning-frontend-nu.vercel.app?token=${token}`);
+    return res.redirect(
+      `${process.env.FRONTEND_URL}?token=${token}`
+    );
   }
 }
