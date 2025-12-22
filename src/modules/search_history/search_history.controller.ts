@@ -15,9 +15,6 @@ export class SearchHistoryController {
     ) { }
     @Post('user/:userId')
     async saveSearch(@Param('userId') userId: string, @Body() dto: dto) {
-        console.log("userIdController", userId);
-
-        console.log("dtoquery", dto);
 
         if (!dto.query) {
             return { message: 'Query dto is required' };
@@ -50,9 +47,15 @@ export class SearchHistoryController {
         @Param('userId') userId: string,
         @Query('term') term: string
     ) {
-        console.log("term", term);
         await this.searchHistory.deleteSearchTerm(userId, term);
         return { message: 'Deleted search term successfully' };
+    }
+
+    @Get('trending')
+    @Public()
+    async getTrendingWords(@Query('limit') limit?: string) {
+        const limitNum = limit ? parseInt(limit) : 5;
+        return await this.searchHistory.getTrendingSearchTerms(limitNum);
     }
 
 }
