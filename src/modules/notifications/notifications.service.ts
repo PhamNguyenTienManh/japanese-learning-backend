@@ -18,7 +18,7 @@ export class NotificationsService {
 
     async pushNotification(fromUserId: string, dto: CreateNotificationDto): Promise<any> {
         const userId = new Types.ObjectId(dto.userId);
-        const fromUserIdObject = new Types.ObjectId(fromUserId)
+        const fromUserIdObject = fromUserId? new Types.ObjectId(fromUserId): "Admin"
         const targetObjectId = new Types.ObjectId(dto.targetId);
 
         const profile = await this.profileModel.findOne({ userId: fromUserIdObject })
@@ -26,7 +26,7 @@ export class NotificationsService {
 
         const notification = await this.notificationModel.create({
             userId: userId,
-            fromProfileId: ProfileId,
+            fromProfileId: ProfileId?ProfileId: fromUserIdObject,
             targetId: targetObjectId,
             title: dto.title,
             message: dto.message,
@@ -40,9 +40,11 @@ export class NotificationsService {
     }
 
     async getNotification(userId: string): Promise<Notification[]> {
-        const ObjectId = new Types.ObjectId(userId);
-        return this.notificationModel.find({ userId: ObjectId })
-    }
+  return this.notificationModel
+    .find({ userId: new Types.ObjectId(userId) })
+    .sort({ createdAt: -1 })  
+    .exec();
+}
 
     async getUnreadCount(userId: string): Promise<number> {
         const ObjectId = new Types.ObjectId(userId);
