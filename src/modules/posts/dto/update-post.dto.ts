@@ -17,7 +17,6 @@ export class UpdatePostDto {
 
     @IsString()
     @IsNotEmpty()
-    @MaxLength(256)
     content: string;
 
     @IsNotEmpty()

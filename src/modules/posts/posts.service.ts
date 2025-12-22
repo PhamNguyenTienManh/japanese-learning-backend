@@ -37,7 +37,7 @@ export class PostsService {
 
         dto.profile_id = profile._id as Types.ObjectId;
         dto.category_id = typeof dto.category_id === 'string' ? new Types.ObjectId(dto.category_id) : dto.category_id;
-        
+
         const post = new this.postModel(dto);
         return post.save();
     }
@@ -48,8 +48,8 @@ export class PostsService {
 
         // Nếu có category_id trong dto, convert sang ObjectId
         if (dto.category_id) {
-            dto.category_id = typeof dto.category_id === 'string' 
-                ? new Types.ObjectId(dto.category_id) 
+            dto.category_id = typeof dto.category_id === 'string'
+                ? new Types.ObjectId(dto.category_id)
                 : dto.category_id;
         }
 
@@ -108,9 +108,10 @@ export class PostsService {
 
     async getAll(page: number = 1, limit: number = 10): Promise<{ data: Posts[]; countComment: any[], total: number; page: number; limit: number; totalPage: number }> {
         const skip = (page - 1) * limit;
+        const filter = { status: 1 };
         const [data, total, countComment] = await Promise.all([
             this.postModel
-                .find().populate("profile_id")
+                .find(filter).populate("profile_id")
                 .sort({ created_at: -1 })
                 .skip(skip)
                 .limit(limit).populate("category_id")
@@ -150,7 +151,7 @@ export class PostsService {
 
     async getStats() {
         const result: object[] = [];
-        const totalPosts = await this.postModel.countDocuments();
+        const totalPosts = await this.postModel.countDocuments({ status: 1 });
         result.push({ totalPosts });
 
         const totalMembers = await this.userModel.countDocuments();
@@ -255,18 +256,15 @@ export class PostsService {
     }
 
     async deleteOne(postId: string): Promise<Posts | null> {
-        const objectId = new Types.ObjectId(postId);
-        const post = await this.postModel.findById(objectId);
-        
-        // Xóa ảnh trên Cloudinary nếu có
-        if (post?.image_publicId) {
-            try {
-                await this.uploadService.deleteImage(post.image_publicId);
-            } catch (error) {
-                console.error('Failed to delete image from Cloudinary:', error);
+        return this.postModel.findByIdAndUpdate(
+            postId,
+            {
+                $set: { status: 0 }
+            },
+            {
+                new: true
             }
-        }
-        
-        return this.postModel.findByIdAndDelete(objectId);
+        );
     }
+
 }
