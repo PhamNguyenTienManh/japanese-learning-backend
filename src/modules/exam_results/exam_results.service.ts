@@ -19,7 +19,10 @@ import { ExamQuestionModule } from "../exam_question/exam_question.module";
 interface QuestionComparison {
   questionId: string;
   questionNumber: string;
+  questionTitle: string;
+  questionKind?: string;
   questionText: string;
+  answers: string[];
   userAnswer: number;
   correctAnswer: number;
   userAnswerText?: string;
@@ -27,6 +30,15 @@ interface QuestionComparison {
   isCorrect: boolean;
   explain?: string;
   explainAll?: string;
+  image?: string;
+  score?: number;
+  level?: number;
+  generalInfo?: {
+    audio?: string;
+    image?: string;
+    txt_read?: string;
+    audios?: { audio_time: number | null }[];
+  };
 }
 
 interface PartComparison {
@@ -249,7 +261,6 @@ export class ExamResultsService {
     }
 
     const parts: PartComparison[] = [];
-    // let totalMaxScore = 0;
 
     for (const ua of userAnswers) {
       const partIdValue =
@@ -265,7 +276,6 @@ export class ExamResultsService {
         .exec()) as unknown as (ExamQuestion & { _id: Types.ObjectId })[];
 
       const questions: QuestionComparison[] = [];
-      // let maxScoreInPart = 0;
 
       // Loop qua TẤT CẢ câu hỏi
       for (
@@ -283,7 +293,6 @@ export class ExamResultsService {
         // Loop qua TẤT CẢ subquestion trong content
         for (let contentIdx = 0; contentIdx < content.length; contentIdx++) {
           const questionContent = content[contentIdx];
-          // maxScoreInPart++;
 
           // Tìm câu trả lời tương ứng
           const answersForThisQuestion = ua.answers.filter(
@@ -295,12 +304,16 @@ export class ExamResultsService {
           const comparison: QuestionComparison = {
             questionId: questionIdStr,
             questionNumber: `${questionNumber}.${contentIdx + 1}`,
+            questionTitle: examQuestion.title,
+            questionKind: examQuestion.kind,
             questionText: questionContent.question,
+            answers: questionContent.answers,
             userAnswer: userAnswerObj?.selectedAnswer ?? -1,
             correctAnswer: questionContent.correctAnswer,
             userAnswerText:
               userAnswerObj?.selectedAnswer !== undefined &&
-              userAnswerObj?.selectedAnswer !== null
+              userAnswerObj?.selectedAnswer !== null &&
+              userAnswerObj?.selectedAnswer >= 0
                 ? questionContent.answers?.[userAnswerObj.selectedAnswer] ??
                   "N/A"
                 : "Chưa chọn đáp án",
@@ -309,13 +322,22 @@ export class ExamResultsService {
             isCorrect: userAnswerObj?.isCorrect ?? false,
             explain: questionContent.explain,
             explainAll: questionContent.explainAll,
+            image: questionContent.image,
+            score: questionContent.score ?? 0,
+            level: examQuestion.level,
+            generalInfo: examQuestion.general
+              ? {
+                  audio: examQuestion.general.audio,
+                  image: examQuestion.general.image,
+                  txt_read: examQuestion.general.txt_read,
+                  audios: examQuestion.general.audios,
+                }
+              : undefined,
           };
 
           questions.push(comparison);
         }
       }
-
-      // totalMaxScore += maxScoreInPart;
 
       parts.push({
         partId: partIdValue.toString(),
