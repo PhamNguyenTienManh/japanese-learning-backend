@@ -116,7 +116,7 @@ export class PostsService {
                 .skip(skip)
                 .limit(limit).populate("category_id")
                 .exec(),
-            this.postModel.countDocuments().exec(),
+            this.postModel.countDocuments({status: 1}).exec(),
             this.commentModel.aggregate([
                 {
                     $group: {
@@ -191,7 +191,7 @@ export class PostsService {
             this.postModel
                 .find(filter)
                 .skip(skip)
-                .limit(limit).populate("category_id")
+                .limit(limit).populate("category_id").populate("profile_id")
                 .sort({ createdAt: -1 }),
 
             this.postModel.countDocuments(filter),
