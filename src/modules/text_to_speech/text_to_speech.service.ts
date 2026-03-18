@@ -8,6 +8,13 @@ import { WaveFile } from 'wavefile';
 import { ConfigService } from '@nestjs/config';
 
 
+
+export interface SyncData {
+  s: number; 
+  e: number; 
+  t: string; 
+}
+
 @Injectable()
 export class TextToSpeechService {
   private readonly VOICEVOX_URL = 'http://127.0.0.1:50021';
@@ -27,7 +34,7 @@ export class TextToSpeechService {
     fs.writeFileSync(outputPath, wav.toBuffer());
   }
 
-  async generateVoiceAndUploadToCloudinary(text: string, speaker = 6): Promise<string> {
+  async generateVoiceAndUploadToCloudinary(text: string, speaker = 6): Promise<{url: string, syncData: SyncData[]}> {
     try {
       const sentences = text
         .split('。')
@@ -40,11 +47,17 @@ export class TextToSpeechService {
       }
 
       const tempFiles: string[] = [];
+      const syncData: SyncData[] = [];
+      const speedRate = 0.8;
+      const silentDuration = 0.5
+
+      let currentTime = 0;
+
 
       // Tạo file silence 0.5 giây
       const silenceFile = path.join(outputDir, 'silence.wav');
       if (!fs.existsSync(silenceFile)) {
-        this.createSilence(0.5, silenceFile);
+        this.createSilence(silentDuration, silenceFile);
       }
 
       // Tạo audio cho từng câu
@@ -55,7 +68,35 @@ export class TextToSpeechService {
           `${this.VOICEVOX_URL}/audio_query?text=${encodeURIComponent(sentence)}&speaker=${speaker}`,
           { method: 'POST' },
         );
-        const queryData = await queryRes.json();
+        const queryData: any = await queryRes.json();
+
+        // tinh toan timestamp
+        let sentenceDurationRaw = 0;
+        queryData.accent_phrases.forEach((phrase: any) => {
+        phrase.moras.forEach((mora: any) => {
+          if (mora.consonant_length) sentenceDurationRaw += mora.consonant_length;
+          if (mora.vowel_length) sentenceDurationRaw += mora.vowel_length;
+        });
+        if (phrase.pause_mora) {
+          sentenceDurationRaw += phrase.pause_mora.vowel_length;
+        }
+      });
+
+      // Điều chỉnh thời gian theo tốc độ (atempo=0.8 thì thời gian kéo dài ra)
+      const adjustedDuration = sentenceDurationRaw / speedRate;
+      const start = parseFloat(currentTime.toFixed(3));
+      const end = parseFloat((start + adjustedDuration).toFixed(3));
+
+      syncData.push({
+        s: start,
+        e: end,
+        t: sentence + '。' // Thêm lại dấu chấm để hiển thị
+      });
+
+      // Cập nhật currentTime cho câu tiếp theo
+      // Bao gồm cả thời gian của file silence (cũng bị slow bởi atempo)
+      currentTime = end + (silentDuration / speedRate);
+      ////
 
         const synthRes = await fetch(`${this.VOICEVOX_URL}/synthesis?speaker=${speaker}`, {
           method: 'POST',
@@ -97,7 +138,7 @@ export class TextToSpeechService {
       const finalFile = path.join(outputDir, `voicevox_${Date.now()}_slow.wav`);
       await new Promise<void>((resolve, reject) => {
         ffmpeg(mergedFile)
-          .audioFilter('atempo=0.8')
+          .audioFilter(`atempo=${speedRate}`)
           .on('error', err => reject(err))
           .on('end', () => resolve())
           .save(finalFile);
@@ -114,7 +155,10 @@ export class TextToSpeechService {
         fs.unlinkSync(finalFile);
       }
 
-      return cloudUrl; // Trả về URL string từ Cloudinary
+      return {
+      url: cloudUrl,
+      syncData: syncData
+    };
 
     } catch (err) {
       console.error('Lỗi khi tạo âm thanh:', err);

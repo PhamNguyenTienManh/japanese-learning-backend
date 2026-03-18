@@ -40,6 +40,7 @@ export class NewsService {
           image: data.content.image ?? existing.content.image,
           textbody: data.content.textbody ?? existing.content.textbody,
           video: data.content.video ?? existing.content.video,
+          syncData: data.content.syncData ?? existing.content.video,
         };
       }
 

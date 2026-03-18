@@ -3,7 +3,7 @@ import { TextToSpeechService } from './text_to_speech.service';
 import { Public } from '../auth/public.decorator';
 import { type Response } from 'express';
 import * as fs from 'fs';
-
+import { SyncData } from './text_to_speech.service';
 
 @Controller('text_to_speech')
 export class TextToSpeechController {
@@ -11,15 +11,16 @@ export class TextToSpeechController {
 
   @Public()
   @Post("upload")
-  async createVoiceAndUpload(@Body() body: { text: string; speaker?: number }) {
+  async createVoiceAndUpload(@Body() body: { text: string; speaker?: number }): Promise<{ audioUrl: string; syncData: SyncData[] }> {
     const { text, speaker = 6 } = body;
     
     // Nhận URL từ Cloudinary
-    const audioUrl = await this.textToSpeechService.generateVoiceAndUploadToCloudinary(text, speaker);
+    const result = await this.textToSpeechService.generateVoiceAndUploadToCloudinary(text, speaker);
 
     // Trả về URL để client sử dụng
     return {
-      audioUrl: audioUrl,
+      audioUrl: result.url,
+      syncData: result.syncData
     };
   }
 

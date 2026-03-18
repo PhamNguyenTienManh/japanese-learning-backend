@@ -1,49 +1,49 @@
 import { Prop, Schema, SchemaFactory } from "@nestjs/mongoose";
 import { Document } from "mongoose";
+import { number } from "zod";
 
-// -------------------------------
-// Subdocument: Nội dung bài viết
-// -------------------------------
+
+class SyncData{
+  @Prop({ type: Number, default: null })
+  s: number;
+
+  @Prop({ type: Number, default: null })
+  e: number;
+
+  @Prop({ type: String, required: true })
+  t: string;
+}
 @Schema({ _id: false })
 class NewsContent {
   @Prop({ type: String, default: null })
-  audio?: string; // link âm thanh (nếu có)
+  audio?: string;
 
   @Prop({ type: String, default: null })
-  image?: string; // ảnh minh họa
+  image?: string;
 
   @Prop({ type: String, required: true })
-  textbody: string; // nội dung chính của bài
+  textbody: string;
 
   @Prop({ type: String, default: null })
-  video?: string; // link video (nếu có)
+  video?: string;
+
+  @Prop({ type: SyncData, default: null })
+  syncData: SyncData[];
 }
 
-// // -------------------------------
-// // Subdocument: Thống kê
-// // -------------------------------
-// @Schema({ _id: false })
-// class NewsStatistics {
-//   @Prop({ type: Number, default: 0, min: 0 })
-//   total_views: number; // tổng lượt xem
-// }
-
-// -------------------------------
-// Main Schema: News
-// -------------------------------
 @Schema({ timestamps: true, collection: "news" })
 export class News extends Document {
   @Prop({ type: String, required: true, trim: true })
-  title: string; // tiêu đề bài viết
+  title: string; 
 
   @Prop({ type: String, required: true })
-  link: string; // link bài viết gốc (VD: forbes, bbc, v.v.)
+  link: string; 
 
   @Prop({ type: String, enum: ["easy", "medium", "hard"], default: "easy" })
-  type: string; // độ khó bài đọc
+  type: string; 
 
   @Prop({ type: NewsContent, required: true })
-  content: NewsContent; // nội dung bài viết (văn bản, hình, video...)
+  content: NewsContent; 
 
   // @Prop({ type: NewsStatistics, default: {} })
   // statistics: NewsStatistics; // thống kê lượt xem
