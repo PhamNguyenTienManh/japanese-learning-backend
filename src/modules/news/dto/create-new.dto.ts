@@ -6,8 +6,10 @@ import {
   IsBoolean,
   IsNumber,
   ValidateNested,
+  IsArray,
 } from "class-validator";
 import { Type } from "class-transformer";
+import { SyncItemDto } from "./sync-item.dto";
 
 export class CreateNewsContentDto {
   @IsOptional()
@@ -25,6 +27,12 @@ export class CreateNewsContentDto {
   @IsOptional()
   @IsString()
   video?: string;
+
+  @IsArray()
+  @IsOptional()
+  @ValidateNested({each: true})
+  @Type(()=> SyncItemDto)
+  syncData: SyncItemDto[];
 }
 
 export class CreateNewsDto {
