@@ -17,4 +17,16 @@ export class TranslateController {
 
     return { translatedText };
   }
+  @Post('argos')
+  async translateFree(@Body() body: any) {
+    const { text, from_lang, to_lang } = body;
+
+    const result = await this.translateService.translateArgos(
+      text,
+      from_lang,
+      to_lang,
+    );
+
+    return { result };
+  }
 }
