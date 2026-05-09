@@ -2,6 +2,17 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
 
 // ---------------------------
+// Subdocument: Action gắn kèm message AI
+// (vd: nút "Xem sổ tay đã tạo" sau khi AI gọi tool tạo notebook)
+// ---------------------------
+export interface ChatMessageAction {
+  type: 'view_notebook';
+  label: string;
+  notebookId?: string;
+  notebookName?: string;
+}
+
+// ---------------------------
 // Subdocument: Message
 // ---------------------------
 @Schema({ _id: false })
@@ -14,6 +25,9 @@ export class ChatMessage {
 
   @Prop({ type: Date, default: Date.now })
   timestamp: Date; // thời gian gửi
+
+  @Prop({ type: [Object], default: [] })
+  actions?: ChatMessageAction[]; // các action gắn kèm (nút bấm)
 }
 
 export const ChatMessageSchema = SchemaFactory.createForClass(ChatMessage);
