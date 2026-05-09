@@ -1,13 +1,17 @@
-import { Module } from '@nestjs/common';
-import { MongooseModule } from '@nestjs/mongoose';
-import { NotebookService } from '../notebook/notebook.service';
-import { NotebookItemService } from '../notebook-item/notebook-item.service';
-import { Notebook, NotebookSchema } from '../notebook/schemas/notebook.schema';
-import { NotebookItem, NotebookItemSchema } from '../notebook-item/schemas/notebook-item.schema';
-import { GeminiProvider } from './provider/gemini.provider';
-import { ChatAgent } from './agent/chat.agent';
-import { NotebookAgent } from './agent/notebook.agent';
-import { GoogleGenAIClient } from './provider/googleGenAIClient';
+import { Module } from "@nestjs/common";
+import { MongooseModule } from "@nestjs/mongoose";
+import { NotebookService } from "../notebook/notebook.service";
+import { NotebookItemService } from "../notebook-item/notebook-item.service";
+import { Notebook, NotebookSchema } from "../notebook/schemas/notebook.schema";
+import {
+  NotebookItem,
+  NotebookItemSchema,
+} from "../notebook-item/schemas/notebook-item.schema";
+import { GeminiProvider } from "./provider/gemini.provider";
+import { ChatAgent } from "./agent/chat.agent";
+import { NotebookAgent } from "./agent/notebook.agent";
+import { GoogleGenAIClient } from "./provider/googleGenAIClient";
+import { NotebookAIService } from "./service/notebook-ai.service";
 
 @Module({
   imports: [
@@ -23,6 +27,7 @@ import { GoogleGenAIClient } from './provider/googleGenAIClient';
     NotebookAgent,
     NotebookService,
     NotebookItemService,
+    NotebookAIService,
   ],
   exports: [GeminiProvider, ChatAgent, GoogleGenAIClient],
 })

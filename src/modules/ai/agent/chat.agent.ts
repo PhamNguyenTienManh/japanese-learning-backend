@@ -7,7 +7,6 @@ import {
   addNotebookItemsTool,
   createNamedNotebookTool,
 } from "../tools/notebookTools";
-import { NotebookAgent } from "./notebook.agent";
 import { NotebookService } from "src/modules/notebook/notebook.service";
 import { NotebookItemService } from "src/modules/notebook-item/notebook-item.service";
 import { AgentExecutor, createToolCallingAgent } from "langchain/agents";
@@ -15,7 +14,10 @@ import {
   ChatPromptTemplate,
   MessagesPlaceholder,
 } from "@langchain/core/prompts";
-import { RunnableWithMessageHistory } from "@langchain/core/runnables";
+import {
+  RunnableLambda,
+  RunnableWithMessageHistory,
+} from "@langchain/core/runnables";
 import {
   InMemoryChatMessageHistory,
   BaseChatMessageHistory,
@@ -23,6 +25,7 @@ import {
 import { SystemMessage, HumanMessage } from "@langchain/core/messages";
 import { GoogleGenAIClient } from "../provider/googleGenAIClient";
 import { ToolInterface } from "@langchain/core/tools";
+import { NotebookAIService } from "../service/notebook-ai.service";
 
 export type ChatRole = "user" | "ai";
 
@@ -44,40 +47,40 @@ export class ChatAgent {
 
   constructor(
     private readonly googleGenAIClient: GoogleGenAIClient,
-    private readonly notebookAgent: NotebookAgent,
+    private readonly notebookAIService: NotebookAIService,
     private readonly notebookService: NotebookService,
-    private readonly notebookItemService: NotebookItemService
+    private readonly notebookItemService: NotebookItemService,
   ) {
     this.systemPrompt = this.loadSystemPrompt();
 
     // Đăng ký TẤT CẢ tools
     this.tools = [
       createNotebookTool(
-        this.notebookAgent,
+        this.notebookAIService,
         this.notebookService,
-        this.notebookItemService
+        this.notebookItemService,
       ) as unknown as ToolInterface,
 
       createNamedNotebookTool(
-        this.notebookAgent,
+        this.notebookAIService,
         this.notebookService,
-        this.notebookItemService
+        this.notebookItemService,
       ) as unknown as ToolInterface,
 
       searchNotebookByNameTool(
-        this.notebookService
+        this.notebookService,
       ) as unknown as ToolInterface,
 
       addNotebookItemsTool(
-        this.notebookAgent,
-        this.notebookItemService
+        this.notebookAIService,
+        this.notebookItemService,
       ) as unknown as ToolInterface,
     ];
 
     this.logger.log(
       `Registered ${this.tools.length} tools: ${this.tools
         .map((t) => t.name)
-        .join(", ")}`
+        .join(", ")}`,
     );
   }
 
@@ -121,22 +124,47 @@ export class ChatAgent {
 
     const agent = createToolCallingAgent({
       llm,
-      tools: this.tools, // Dùng array tools
+      tools: this.tools,
       prompt,
     });
 
     this.executor = new AgentExecutor({
       agent,
-      tools: this.tools, // Dùng array tools
-      maxIterations: 10, // Tăng lên để đủ cho multi-step workflow
+      tools: this.tools,
+      maxIterations: 10,
       returnIntermediateSteps: true,
     });
 
+    // Normalize output: Gemini trả array khi có emoji/special chars
+    const normalizedExecutor = this.executor.pipe(
+      new RunnableLambda({
+        func: (result: any) => {
+          let text = result?.output;
+
+          if (Array.isArray(text)) {
+            text = text
+              .filter(
+                (m: any) => m?.type === "text" && typeof m?.text === "string",
+              )
+              .map((m: any) => m.text)
+              .join("");
+          } else if (typeof text === "object" && text !== null) {
+            text = text.text || text.content || JSON.stringify(text);
+          }
+
+          return {
+            ...result,
+            output: typeof text === "string" ? text : JSON.stringify(text),
+          };
+        },
+      }),
+    );
+
     this.withHistory = new RunnableWithMessageHistory({
-      runnable: this.executor,
+      runnable: normalizedExecutor, // dùng normalizedExecutor
       getMessageHistory: (sessionId: string) => {
         this.logger.debug(
-          `getMessageHistory called with sessionId: ${sessionId}`
+          `getMessageHistory called with sessionId: ${sessionId}`,
         );
 
         if (!sessionId || typeof sessionId !== "string") {
@@ -144,7 +172,6 @@ export class ChatAgent {
           throw new Error("sessionId must be a string");
         }
 
-        this.logger.debug(`Getting history for session: ${sessionId}`);
         return this.getHistory(sessionId);
       },
       inputMessagesKey: "input",
@@ -162,7 +189,7 @@ export class ChatAgent {
     messages: ChatMessage[],
     userMessage: string,
     sessionId: string,
-    userId: string
+    userId: string,
   ): Promise<string> {
     if (!sessionId) {
       this.logger.error("sessionId is missing");
@@ -180,6 +207,7 @@ export class ChatAgent {
       typeof userMessage === "string" ? userMessage : String(userMessage);
 
     const payload = { input: safeInput };
+
     const config = {
       configurable: {
         sessionId,
@@ -215,7 +243,13 @@ export class ChatAgent {
       }
 
       // Trả về string
-      return typeof output === "string" ? output : JSON.stringify(output);
+      const finalOutput =
+        typeof output === "string" && output.trim().length > 0
+          ? output
+          : "Xin lỗi, mình chưa có phản hồi phù hợp";
+
+      return finalOutput;
+      // return typeof output === "string" ? output : JSON.stringify(output);
     } catch (err) {
       this.logger.error("[ChatAgent] Failed to generate response");
       this.logger.error("Error:", err.message);
