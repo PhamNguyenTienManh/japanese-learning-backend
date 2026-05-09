@@ -3,28 +3,32 @@
 <head>
 <meta charset="utf-8"/>
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+  {{#if fontBase64}}
+  @font-face {
+    font-family: "Noto Sans JP";
+    src: url("data:font/woff2;base64,{{fontBase64}}") format("woff2");
+    font-weight: normal;
+    font-style: normal;
+  }
+  {{/if}}
 
+  * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
     font-family: "Noto Sans JP", "MS Gothic", "Yu Gothic", sans-serif;
     padding: 20px;
     background: white;
   }
-
   .word-block {
     page-break-inside: avoid;
     margin-bottom: 22px;
     border: 2px solid #000;
   }
-
   .row {
     display: flex;
     border-bottom: 2px solid #000;
     height: 60px;
   }
-
   .row:last-child { border-bottom: none; }
-
   .left-cell {
     width: 60px;
     min-width: 60px;
@@ -33,9 +37,7 @@
     justify-content: center;
     align-items: center;
   }
-
   .large-char { font-size: 42px; font-weight: 600; }
-
   .text-info {
     font-size: 10px;
     padding: 6px;
@@ -43,17 +45,13 @@
     justify-content: flex-start;
     line-height: 1.4;
   }
-
   .grid-container { flex: 1; display: flex; height: 100%; }
-
   .grid-cell {
     flex: 1;
     position: relative;
     border-right: 1px solid #bbb;
   }
-
   .grid-cell:last-child { border-right: none; }
-
   .grid-cell::before {
     content: "";
     position: absolute;
@@ -65,7 +63,6 @@
       linear-gradient(to bottom left, transparent calc(50% - 0.35px), #ccc calc(50% - 0.35px), #ccc calc(50% + 0.35px), transparent calc(50% + 0.35px));
     pointer-events: none;
   }
-
   .grid-content {
     position: absolute;
     inset: 0;
@@ -74,12 +71,10 @@
     align-items: center;
     z-index: 2;
   }
-
   .stroke svg {
     width: 85%;
     height: 85%;
   }
-
   .stroke svg path {
     stroke: black !important;
     stroke-width: 3 !important;
@@ -87,20 +82,15 @@
     stroke-linecap: round;
     stroke-linejoin: round;
   }
-
   .practice-char {
     font-size: 44px;
     color: #d8d8d8;
   }
-
 </style>
 </head>
-
 <body>
-
 {{#each words}}
 <div class="word-block">
-
   <!-- HÀNG 1: Chữ to + stroke SVG -->
   <div class="row">
     <div class="left-cell large-char">{{this.firstChar}}</div>
@@ -114,36 +104,27 @@
       {{/each}}
     </div>
   </div>
-
   <!-- HÀNG 2: Phiên âm + chữ mờ -->
   <div class="row">
     <div class="left-cell text-info">{{this.phonetic}}</div>
     <div class="grid-container">
-
       {{#each this.practiceBoxes}}
         <div class="grid-cell">
           <div class="grid-content practice-char">{{../firstChar}}</div>
         </div>
       {{/each}}
-
     </div>
   </div>
-
   <!-- HÀNG 3: Nghĩa + ô trống -->
   <div class="row">
     <div class="left-cell text-info">{{this.meanings}}</div>
     <div class="grid-container">
-
-      {{!-- fix số ô của dòng cuối = y chang practiceBoxes --}}
       {{#each this.practiceBoxes}}
         <div class="grid-cell"></div>
       {{/each}}
-
     </div>
   </div>
-
 </div>
 {{/each}}
-
 </body>
 </html>
