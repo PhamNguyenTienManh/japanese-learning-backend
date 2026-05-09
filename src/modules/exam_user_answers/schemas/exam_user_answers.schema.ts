@@ -10,6 +10,9 @@ export class UserAnswer {
   questionId: Types.ObjectId; // Tham chiếu đến câu hỏi gốc
 
   @Prop({ type: Number, required: true })
+  subQuestionIndex: number; // Thứ tự sub-question trong content[] của câu hỏi
+
+  @Prop({ type: Number, required: true })
   selectedAnswer: number; // Index đáp án người dùng chọn
 
   @Prop({ type: Boolean, default: false })

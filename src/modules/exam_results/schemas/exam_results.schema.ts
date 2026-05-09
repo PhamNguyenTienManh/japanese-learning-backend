@@ -39,6 +39,9 @@ export class ExamResult extends Document {
     default: ExamStatus.IN_PROGRESS,
   })
   status: ExamStatus;
+
+  @Prop({ type: Number, default: 0 })
+  saved_elapsed: number; // Thời gian đã làm (giây) khi user lưu bài
 }
 
 export const ExamResultSchema = SchemaFactory.createForClass(ExamResult);

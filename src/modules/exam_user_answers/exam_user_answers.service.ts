@@ -22,7 +22,6 @@ export class ExamUserAnswersService {
       if (!question) throw new Error(`Question ${a.questionId} not found`);
 
       for (const sub of a.subAnswers) {
-        // Kiểm tra subQuestionIndex hợp lệ
         if (
           sub.subQuestionIndex < 0 ||
           sub.subQuestionIndex >= question.content.length
@@ -37,12 +36,14 @@ export class ExamUserAnswersService {
 
         userAnswerDocs.push({
           questionId: question.id,
+          subQuestionIndex: sub.subQuestionIndex,
           selectedAnswer: sub.selectedAnswer,
           isCorrect,
         });
       }
     }
 
+    // findOneAndUpdate ghi đè toàn bộ array → đáp án cũ tự động bị thay thế khi user chỉnh sửa
     const updated = await this.examUserAnswerModel.findOneAndUpdate(
       {
         examResultId: new Types.ObjectId(dto.examResultId),
