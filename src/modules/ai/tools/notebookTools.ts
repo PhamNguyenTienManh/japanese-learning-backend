@@ -4,27 +4,21 @@ import { z } from "zod";
 import { NotebookService } from "src/modules/notebook/notebook.service";
 import { NotebookItemService } from "src/modules/notebook-item/notebook-item.service";
 import { NotebookAIService } from "../service/notebook-ai.service";
-import { RunnableConfig } from "@langchain/core/runnables";
 
 // ==================== TOOL 1: TẠO NOTEBOOK MỚI ====================
 export const createNotebookTool = (
   notebookAIService: NotebookAIService,
   notebookService: NotebookService,
   notebookItemService: NotebookItemService,
+  userId: string,
 ) => {
-  const toolFunc = async (
-    input: { prompt: string },
-    config?: RunnableConfig,
-  ) => {
+  const toolFunc = async (input: { prompt: string }) => {
     console.log("=== CREATE NOTEBOOK TOOL CALLED ===");
     console.log("Input:", input);
-    console.log("Config:", config?.configurable);
-
-    const userId = config?.configurable?.userId as string;
 
     if (!userId) {
-      console.error("ERROR: userId not found in config!");
-      throw new Error("userId is required from config");
+      console.error("ERROR: userId not bound to tool!");
+      throw new Error("userId is required");
     }
 
     console.log("Using userId:", userId);
@@ -80,20 +74,17 @@ export const createNotebookTool = (
 };
 
 // ==================== TOOL 2: TÌM NOTEBOOK THEO TÊN ====================
-export const searchNotebookByNameTool = (notebookService: NotebookService) => {
-  const toolFunc = async (
-    input: { keyword: string },
-    config?: RunnableConfig,
-  ) => {
+export const searchNotebookByNameTool = (
+  notebookService: NotebookService,
+  userId: string,
+) => {
+  const toolFunc = async (input: { keyword: string }) => {
     console.log("=== SEARCH TOOL CALLED ===");
     console.log("Input:", input);
-    console.log("Config:", config?.configurable);
-
-    const userId = config?.configurable?.userId as string;
 
     if (!userId) {
-      console.error("ERROR: userId not found in config!");
-      throw new Error("userId is required from config");
+      console.error("ERROR: userId not bound to tool!");
+      throw new Error("userId is required");
     }
 
     console.log("Using userId:", userId);
@@ -144,13 +135,9 @@ export const addNotebookItemsTool = (
   notebookAIService: NotebookAIService,
   notebookItemService: NotebookItemService,
 ) => {
-  const toolFunc = async (
-    input: { notebookId: string; prompt: string },
-    config?: RunnableConfig,
-  ) => {
+  const toolFunc = async (input: { notebookId: string; prompt: string }) => {
     console.log("=== ADD ITEMS TOOL CALLED ===");
     console.log("Input:", input);
-    console.log("Config:", config?.configurable);
 
     if (!input.notebookId) throw new Error("notebookId is required");
     if (!input.prompt) throw new Error("prompt is required");
@@ -203,20 +190,15 @@ export const createNamedNotebookTool = (
   notebookAIService: NotebookAIService,
   notebookService: NotebookService,
   notebookItemService: NotebookItemService,
+  userId: string,
 ) => {
-  const toolFunc = async (
-    input: { name: string; prompt: string },
-    config?: RunnableConfig,
-  ) => {
+  const toolFunc = async (input: { name: string; prompt: string }) => {
     console.log("=== CREATE NAMED NOTEBOOK TOOL CALLED ===");
     console.log("Input:", input);
-    console.log("Config:", config?.configurable);
-
-    const userId = config?.configurable?.userId as string;
 
     if (!userId) {
-      console.error("ERROR: userId not found in config!");
-      throw new Error("userId is required from config");
+      console.error("ERROR: userId not bound to tool!");
+      throw new Error("userId is required");
     }
 
     if (!input.name || !input.prompt) {
@@ -272,6 +254,113 @@ export const createNamedNotebookTool = (
           'The name for the new notebook (e.g., "Từ vựng về gia đình", "Kanji N5")',
         ),
       prompt: z.string().describe("What vocabulary/kanji to generate"),
+    }),
+  });
+};
+
+// ==================== TOOL 5: LIỆT KÊ TẤT CẢ NOTEBOOK CỦA USER ====================
+export const listUserNotebooksTool = (
+  notebookService: NotebookService,
+  notebookItemService: NotebookItemService,
+  userId: string,
+) => {
+  const toolFunc = async () => {
+    console.log("=== LIST USER NOTEBOOKS TOOL CALLED ===");
+
+    if (!userId) {
+      throw new Error("userId is required");
+    }
+
+    const notebooks = await notebookService.findByUserId(userId);
+
+    // Đếm số item mỗi sổ — chạy song song
+    const enriched = await Promise.all(
+      notebooks.map(async (nb) => {
+        const items = await notebookItemService.getItemByNotebookId(
+          nb.id.toString(),
+        );
+        return {
+          id: nb.id.toString(),
+          name: nb.name,
+          itemsCount: items.length,
+        };
+      }),
+    );
+
+    console.log(`Found ${enriched.length} notebooks`);
+
+    return JSON.stringify({
+      success: true,
+      total: enriched.length,
+      notebooks: enriched,
+      message: `User có ${enriched.length} sổ tay`,
+    });
+  };
+
+  return tool(toolFunc, {
+    name: "list_user_notebooks",
+    description:
+      'List ALL notebooks owned by the current user (no parameters needed). Use when user asks "tôi có những sổ tay nào", "danh sách sổ tay của tôi", "show my notebooks", "có bao nhiêu sổ tay".',
+    schema: z.object({}),
+  });
+};
+
+// ==================== TOOL 6: LẤY DANH SÁCH ITEMS TRONG 1 NOTEBOOK ====================
+export const getNotebookItemsTool = (
+  notebookService: NotebookService,
+  notebookItemService: NotebookItemService,
+  userId: string,
+) => {
+  const toolFunc = async (input: { notebookId: string }) => {
+    console.log("=== GET NOTEBOOK ITEMS TOOL CALLED ===");
+    console.log("Input:", input);
+
+    if (!input.notebookId) throw new Error("notebookId is required");
+    if (!userId) throw new Error("userId is required");
+
+    // Verify ownership: notebook phải thuộc về user này
+    const notebooks = await notebookService.findByUserId(userId);
+    const notebook = notebooks.find(
+      (nb) => nb.id.toString() === input.notebookId,
+    );
+    if (!notebook) {
+      return JSON.stringify({
+        success: false,
+        message: `Không tìm thấy sổ tay với id "${input.notebookId}" của user này`,
+      });
+    }
+
+    const items = await notebookItemService.getItemByNotebookId(
+      input.notebookId,
+    );
+
+    const slim = items.map((it) => ({
+      name: it.name,
+      phonetic: it.phonetic ?? "",
+      mean: it.mean ?? "",
+      notes: it.notes ?? "",
+      type: it.type,
+      remember: it.remember,
+    }));
+
+    console.log(`Found ${slim.length} items in notebook "${notebook.name}"`);
+
+    return JSON.stringify({
+      success: true,
+      notebookId: input.notebookId,
+      notebookName: notebook.name,
+      itemsCount: slim.length,
+      items: slim,
+      message: `Sổ tay "${notebook.name}" có ${slim.length} mục`,
+    });
+  };
+
+  return tool(toolFunc, {
+    name: "get_notebook_items",
+    description:
+      'List all vocabulary/kanji items inside a specific notebook (by notebookId). Use when user asks "trong sổ X có gì", "liệt kê từ vựng trong sổ Y", "show items in notebook". Combine with search_notebook_by_name first if user only provides the name.',
+    schema: z.object({
+      notebookId: z.string().describe("ID of the notebook to inspect"),
     }),
   });
 };

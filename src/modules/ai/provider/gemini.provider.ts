@@ -1,24 +1,25 @@
 import { Injectable } from '@nestjs/common';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { VertexAI } from '@google-cloud/vertexai';
 
 
 @Injectable()
 export class GeminiProvider {
-    private readonly genAI: GoogleGenerativeAI;
+    private readonly vertexAI: VertexAI;
 
     constructor() {
-    const apiKey = process.env.GOOGLE_GEMINI_API_KEY;
-    if (!apiKey) throw new Error('Missing GOOGLE_GEMINI_API_KEY');
+        const project = process.env.GOOGLE_CLOUD_PROJECT;
+        if (!project) throw new Error('Missing GOOGLE_CLOUD_PROJECT');
+        const location = process.env.GOOGLE_CLOUD_LOCATION ?? 'us-central1';
 
-    this.genAI = new GoogleGenerativeAI(apiKey);
+        this.vertexAI = new VertexAI({ project, location });
     }
 
     getChatModel() {
-        return this.genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+        return this.vertexAI.getGenerativeModel({ model: 'gemini-1.5-flash-002' });
     }
 
 
     getVisionModel() {
-        return this.genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+        return this.vertexAI.getGenerativeModel({ model: 'gemini-1.5-flash-002' });
     }
 }

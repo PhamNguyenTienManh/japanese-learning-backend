@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, Param, Post, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Req, Res } from '@nestjs/common';
+import type { Response } from 'express';
 import { CreateMessageDto } from './dto/ai-chat.dto';
 import { AiChatSessionsService } from './ai_chat_sessions.service';
 import { Public } from '../auth/public.decorator';
@@ -29,6 +30,44 @@ export class AiChatSessionsController {
     ) {
         const userId = req.user.sub;
         return this.aiChatService.sendMessage(sessionId, createMessageDto, userId);
+    }
+
+    /**
+     * POST /ai-chat/:sessionId/message/stream
+     * Gửi tin nhắn và nhận phản hồi token-by-token qua SSE
+     */
+    @Post(':sessionId/message/stream')
+    async sendMessageStream(
+        @Param('sessionId') sessionId: string,
+        @Body() createMessageDto: CreateMessageDto,
+        @Req() req: any,
+        @Res() res: Response,
+    ) {
+        const userId = req.user.sub;
+
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache, no-transform');
+        res.setHeader('Connection', 'keep-alive');
+        res.setHeader('X-Accel-Buffering', 'no');
+        res.flushHeaders?.();
+
+        const writeEvent = (data: Record<string, any>) => {
+            res.write(`data: ${JSON.stringify(data)}\n\n`);
+        };
+
+        try {
+            for await (const event of this.aiChatService.streamMessage(
+                sessionId,
+                createMessageDto,
+                userId,
+            )) {
+                writeEvent(event);
+            }
+        } catch (err: any) {
+            writeEvent({ type: 'error', message: err?.message ?? 'Stream failed' });
+        } finally {
+            res.end();
+        }
     }
 
     /**

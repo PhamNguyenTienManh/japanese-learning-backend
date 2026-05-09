@@ -6,6 +6,8 @@ import {
   searchNotebookByNameTool,
   addNotebookItemsTool,
   createNamedNotebookTool,
+  listUserNotebooksTool,
+  getNotebookItemsTool,
 } from "../tools/notebookTools";
 import { NotebookService } from "src/modules/notebook/notebook.service";
 import { NotebookItemService } from "src/modules/notebook-item/notebook-item.service";
@@ -39,9 +41,6 @@ export interface ChatMessage {
 export class ChatAgent {
   private readonly logger = new Logger(ChatAgent.name);
 
-  private tools: ToolInterface[];
-  private executor?: AgentExecutor;
-  private withHistory?: RunnableWithMessageHistory<any, any>;
   private histories = new Map<string, BaseChatMessageHistory>();
   private systemPrompt: string;
 
@@ -52,36 +51,6 @@ export class ChatAgent {
     private readonly notebookItemService: NotebookItemService,
   ) {
     this.systemPrompt = this.loadSystemPrompt();
-
-    // Đăng ký TẤT CẢ tools
-    this.tools = [
-      createNotebookTool(
-        this.notebookAIService,
-        this.notebookService,
-        this.notebookItemService,
-      ) as unknown as ToolInterface,
-
-      createNamedNotebookTool(
-        this.notebookAIService,
-        this.notebookService,
-        this.notebookItemService,
-      ) as unknown as ToolInterface,
-
-      searchNotebookByNameTool(
-        this.notebookService,
-      ) as unknown as ToolInterface,
-
-      addNotebookItemsTool(
-        this.notebookAIService,
-        this.notebookItemService,
-      ) as unknown as ToolInterface,
-    ];
-
-    this.logger.log(
-      `Registered ${this.tools.length} tools: ${this.tools
-        .map((t) => t.name)
-        .join(", ")}`,
-    );
   }
 
   private loadSystemPrompt(): string {
@@ -100,21 +69,54 @@ export class ChatAgent {
     }
 
     if (this.histories.has(sessionId)) {
-      this.logger.debug(`Found existing history for session: ${sessionId}`);
       return this.histories.get(sessionId)!;
     }
 
-    this.logger.debug(`Creating new history for session: ${sessionId}`);
     const history = new InMemoryChatMessageHistory();
     this.histories.set(sessionId, history);
     return history;
   }
 
-  private async initAgentExecutor() {
-    if (this.executor && this.withHistory) return;
+  /**
+   * Build executor wrapper với tools đã bind userId qua closure.
+   * Tạo lại mỗi request — rẻ, và tránh được vụ config không propagate
+   * trong streamEvents của RunnableWithMessageHistory.
+   */
+  private buildWithHistory(userId: string) {
+    const tools: ToolInterface[] = [
+      createNotebookTool(
+        this.notebookAIService,
+        this.notebookService,
+        this.notebookItemService,
+        userId,
+      ) as unknown as ToolInterface,
+      createNamedNotebookTool(
+        this.notebookAIService,
+        this.notebookService,
+        this.notebookItemService,
+        userId,
+      ) as unknown as ToolInterface,
+      searchNotebookByNameTool(
+        this.notebookService,
+        userId,
+      ) as unknown as ToolInterface,
+      addNotebookItemsTool(
+        this.notebookAIService,
+        this.notebookItemService,
+      ) as unknown as ToolInterface,
+      listUserNotebooksTool(
+        this.notebookService,
+        this.notebookItemService,
+        userId,
+      ) as unknown as ToolInterface,
+      getNotebookItemsTool(
+        this.notebookService,
+        this.notebookItemService,
+        userId,
+      ) as unknown as ToolInterface,
+    ];
 
     const llm = this.googleGenAIClient.getModel();
-
     const prompt = ChatPromptTemplate.fromMessages([
       new SystemMessage(this.systemPrompt),
       new MessagesPlaceholder("chat_history"),
@@ -122,25 +124,19 @@ export class ChatAgent {
       new MessagesPlaceholder("agent_scratchpad"),
     ]);
 
-    const agent = createToolCallingAgent({
-      llm,
-      tools: this.tools,
-      prompt,
-    });
-
-    this.executor = new AgentExecutor({
+    const agent = createToolCallingAgent({ llm, tools, prompt });
+    const executor = new AgentExecutor({
       agent,
-      tools: this.tools,
+      tools,
       maxIterations: 10,
       returnIntermediateSteps: true,
     });
 
     // Normalize output: Gemini trả array khi có emoji/special chars
-    const normalizedExecutor = this.executor.pipe(
+    const normalizedExecutor = executor.pipe(
       new RunnableLambda({
         func: (result: any) => {
           let text = result?.output;
-
           if (Array.isArray(text)) {
             text = text
               .filter(
@@ -151,7 +147,6 @@ export class ChatAgent {
           } else if (typeof text === "object" && text !== null) {
             text = text.text || text.content || JSON.stringify(text);
           }
-
           return {
             ...result,
             output: typeof text === "string" ? text : JSON.stringify(text),
@@ -160,18 +155,13 @@ export class ChatAgent {
       }),
     );
 
-    this.withHistory = new RunnableWithMessageHistory({
-      runnable: normalizedExecutor, // dùng normalizedExecutor
+    const withHistory = new RunnableWithMessageHistory({
+      runnable: normalizedExecutor,
       getMessageHistory: (sessionId: string) => {
-        this.logger.debug(
-          `getMessageHistory called with sessionId: ${sessionId}`,
-        );
-
         if (!sessionId || typeof sessionId !== "string") {
           this.logger.error("Invalid sessionId:", sessionId);
           throw new Error("sessionId must be a string");
         }
-
         return this.getHistory(sessionId);
       },
       inputMessagesKey: "input",
@@ -179,7 +169,7 @@ export class ChatAgent {
       outputMessagesKey: "output",
     });
 
-    this.logger.log("Agent executor initialized successfully");
+    return withHistory;
   }
 
   /**
@@ -200,7 +190,7 @@ export class ChatAgent {
       throw new Error("userId is required");
     }
 
-    await this.initAgentExecutor();
+    const withHistory = this.buildWithHistory(userId);
 
     // Ép userMessage thành string an toàn
     const safeInput =
@@ -211,19 +201,11 @@ export class ChatAgent {
     const config = {
       configurable: {
         sessionId,
-        userId,
       },
     };
 
-    this.logger.warn(`[ChatAgent] === CRITICAL DEBUG ===`);
-    this.logger.warn(`  Input userId: ${userId}`);
-    this.logger.warn(`  Input userId type: ${typeof userId}`);
-    this.logger.warn(`  Input sessionId: ${sessionId}`);
-    this.logger.warn(`  Config object: ${JSON.stringify(config, null, 2)}`);
-    this.logger.warn(`  ================================`);
-
     try {
-      const result = await this.withHistory!.invoke(payload, config);
+      const result = await withHistory.invoke(payload, config);
 
       this.logger.log(`Agent response received`);
       this.logger.debug(`Result type: ${typeof result?.output}`);
@@ -257,4 +239,78 @@ export class ChatAgent {
       throw err;
     }
   }
+
+  /**
+   * Stream phản hồi token-by-token và tool result.
+   * Yield một trong:
+   *   { kind: "token", text }    — text do LLM sinh ra
+   *   { kind: "tool",  toolName, output } — kết quả của tool sau khi chạy
+   */
+  public async *streamReply(
+    userMessage: string,
+    sessionId: string,
+    userId: string,
+  ): AsyncGenerator<StreamReplyEvent, void, void> {
+    if (!sessionId) throw new Error("sessionId is required");
+    if (!userId) throw new Error("userId is required");
+
+    const withHistory = this.buildWithHistory(userId);
+
+    const safeInput =
+      typeof userMessage === "string" ? userMessage : String(userMessage);
+    const payload = { input: safeInput };
+    const config = {
+      configurable: { sessionId },
+      version: "v2" as const,
+    };
+
+    const eventStream = withHistory.streamEvents(payload, config);
+
+    for await (const event of eventStream) {
+      if (event.event === "on_chat_model_stream") {
+        const chunk: any = (event as any).data?.chunk;
+        const content = chunk?.content;
+
+        let text = "";
+        if (typeof content === "string") {
+          text = content;
+        } else if (Array.isArray(content)) {
+          text = content
+            .filter(
+              (c: any) => c?.type === "text" && typeof c?.text === "string",
+            )
+            .map((c: any) => c.text)
+            .join("");
+        }
+
+        if (text) yield { kind: "token", text };
+      } else if (event.event === "on_tool_end") {
+        const toolName = (event as any).name as string;
+        const rawOutput = (event as any).data?.output;
+
+        // Tool có thể trả string (JSON.stringify) hoặc ToolMessage có content
+        let asText: string | undefined;
+        if (typeof rawOutput === "string") {
+          asText = rawOutput;
+        } else if (rawOutput && typeof rawOutput.content === "string") {
+          asText = rawOutput.content;
+        }
+
+        let parsed: any = rawOutput;
+        if (asText) {
+          try {
+            parsed = JSON.parse(asText);
+          } catch {
+            parsed = asText;
+          }
+        }
+
+        yield { kind: "tool", toolName, output: parsed };
+      }
+    }
+  }
 }
+
+export type StreamReplyEvent =
+  | { kind: "token"; text: string }
+  | { kind: "tool"; toolName: string; output: any };
