@@ -114,64 +114,68 @@ export class ExamResultsService {
 
   // --- Resume bài thi ---
   async resumeExam(examResultId: string, userId: string) {
+    const examResultOid = new Types.ObjectId(examResultId);
+    const userOid = new Types.ObjectId(userId);
+
     const examResult = await this.examResultModel.findOne({
-      _id: examResultId,
-      userId,
+      _id: examResultOid,
+      userId: userOid,
     });
     if (!examResult) throw new NotFoundException("ExamResult not found");
 
     const answers = await this.examUserAnswerModel
-      .find({ examResultId, userId })
+      .find({ examResultId: examResultOid, userId: userOid })
       .lean();
-
-    const now = new Date();
-    const elapsed = Math.floor(
-      (now.getTime() - examResult.start_time.getTime()) / 1000
-    );
 
     return {
       examResultId,
       examId: examResult.examId,
       start_time: examResult.start_time,
-      elapsed, // thời gian đã làm
+      elapsed: examResult.saved_elapsed ?? 0, // thời gian đã làm khi user lưu
       answers,
     };
   }
 
+  // --- Lưu tiến trình bài thi ---
+  async saveProgress(examResultId: string, userId: string, elapsed: number) {
+    const examResult = await this.examResultModel.findOne({
+      _id: new Types.ObjectId(examResultId),
+      userId: new Types.ObjectId(userId),
+    });
+    if (!examResult) throw new NotFoundException("ExamResult not found");
+    if (examResult.status === ExamStatus.COMPLETED) {
+      throw new Error("Cannot save a completed exam");
+    }
+
+    examResult.status = ExamStatus.SAVING;
+    examResult.saved_elapsed = elapsed;
+    await examResult.save();
+
+    return { examResultId, elapsed };
+  }
+
   // Kiểm tra trạng thái bài làm của user
   async checkExamStatus(examId: string, userId: string) {
-    const results = await this.examResultModel
-      .find({
+    const latest = await this.examResultModel
+      .findOne({
         examId: new Types.ObjectId(examId),
         userId: new Types.ObjectId(userId),
       })
-      .sort({ createdAt: -1 }); // newest → oldest
+      .sort({ createdAt: -1 }); // lấy bài mới nhất
 
-    // Không có bài thi nào → chưa làm
-    if (results.length === 0) {
+    if (!latest) {
       return { status: "not_started" };
     }
 
-    // Lặp qua tất cả kết quả theo thứ tự mới nhất → cũ nhất
-    for (const result of results) {
-      if (result.status === ExamStatus.COMPLETED) {
-        return {
-          status: "completed",
-          examResultId: result._id,
-        };
-      }
-
-      if (result.status === ExamStatus.SAVING) {
-        return {
-          status: "saving",
-          examResultId: result._id,
-        };
-      }
-
-      // Nếu là in_progress → tiếp tục lặp xuống để tìm bản ghi hợp lệ
+    if (latest.status === ExamStatus.COMPLETED) {
+      return { status: "completed", examResultId: latest._id };
     }
 
-    // Nếu duyệt hết mà chỉ toàn in_progress → xem như chưa làm bao giờ
+    if (latest.status === ExamStatus.SAVING) {
+      return { status: "saving", examResultId: latest._id };
+    }
+
+    // IN_PROGRESS (chưa lưu thủ công) → xem như chưa làm
     return { status: "not_started" };
   }
 
@@ -294,12 +298,12 @@ export class ExamResultsService {
         for (let contentIdx = 0; contentIdx < content.length; contentIdx++) {
           const questionContent = content[contentIdx];
 
-          // Tìm câu trả lời tương ứng
-          const answersForThisQuestion = ua.answers.filter(
-            (a) => a.questionId.toString() === questionIdStr
+          // Tìm câu trả lời tương ứng dựa trên subQuestionIndex
+          const userAnswerObj = ua.answers.find(
+            (a) =>
+              a.questionId.toString() === questionIdStr &&
+              a.subQuestionIndex === contentIdx
           );
-
-          const userAnswerObj = answersForThisQuestion[contentIdx];
 
           const comparison: QuestionComparison = {
             questionId: questionIdStr,
@@ -402,32 +406,14 @@ export class ExamResultsService {
           questionMap.set(q.id.toString(), q);
         }
 
-        // Group answers theo questionId để xử lý
-        const answersByQuestion = new Map<string, UserAnswer[]>();
+        // Tính điểm dựa trên subQuestionIndex chính xác
         for (const ans of ua.answers) {
-          const qId = ans.questionId.toString();
-          if (!answersByQuestion.has(qId)) {
-            answersByQuestion.set(qId, []);
-          }
-          answersByQuestion.get(qId)!.push(ans);
-        }
+          const examQuestion = questionMap.get(ans.questionId.toString());
+          if (!examQuestion || !examQuestion.content) continue;
 
-        // Tính điểm cho từng nhóm câu hỏi
-        for (const [questionId, answers] of answersByQuestion.entries()) {
-          const examQuestion = questionMap.get(questionId);
-          if (!examQuestion) continue;
-
-          // Duyệt qua từng answer và map với content tương ứng
-          for (let i = 0; i < answers.length; i++) {
-            const ans = answers[i];
-            if (
-              ans.isCorrect &&
-              examQuestion.content &&
-              examQuestion.content[i]
-            ) {
-              const questionContent = examQuestion.content[i];
-              partScore += questionContent.score || 1;
-            }
+          const questionContent = examQuestion.content[ans.subQuestionIndex];
+          if (ans.isCorrect && questionContent) {
+            partScore += questionContent.score || 1;
           }
         }
       }

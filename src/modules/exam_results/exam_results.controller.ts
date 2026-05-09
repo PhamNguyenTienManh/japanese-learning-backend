@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Req } from '@nestjs/common';
 import { ExamResultsService } from './exam_results.service';
 import { ExamResult } from './schemas/exam_results.schema';
 
@@ -49,7 +49,17 @@ export class ExamResultsController {
     @Param('examId') examId: string,
     @Req() req: any
   ) {
-    const userId = req.user.sub; // Lấy userId từ JWT
+    const userId = req.user.sub;
     return this.examResultsService.getExamComparison(examId, userId);
+  }
+
+  // Lưu tiến trình bài thi (elapsed time + cập nhật status → SAVING)
+  @Patch('save-progress')
+  async saveProgress(
+    @Body() body: { examResultId: string; elapsed: number },
+    @Req() req: any,
+  ) {
+    const userId = req.user.sub;
+    return this.examResultsService.saveProgress(body.examResultId, userId, body.elapsed);
   }
 }
