@@ -1,7 +1,7 @@
 // google-genai.provider.ts
-import { Injectable, Logger } from '@nestjs/common';
-import { ChatGoogleGenerativeAI } from '@langchain/google-genai';
-import * as dotenv from 'dotenv';
+import { Injectable, Logger } from "@nestjs/common";
+import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
+import * as dotenv from "dotenv";
 
 dotenv.config();
 
@@ -13,10 +13,10 @@ export class GoogleGenAIClient {
   constructor() {
     const apiKey = process.env.GOOGLE_GEMINI_API_KEY;
     if (!apiKey) {
-      this.logger.warn('[AI] No Gemini API key found in GOOGLE_GEMINI_API_KEY');
+      this.logger.warn("[AI] No Gemini API key found in GOOGLE_GEMINI_API_KEY");
     }
 
-    const modelName = 'gemini-2.5-flash-lite';
+    const modelName = "gemini-2.0-flash-lite";
     const temperature = 0.2;
     const maxRetries = 4;
 
@@ -25,6 +25,7 @@ export class GoogleGenAIClient {
       temperature,
       apiKey,
       maxRetries,
+      streaming: false,
     });
   }
 
@@ -33,7 +34,7 @@ export class GoogleGenAIClient {
   }
 
   async generate(text: string): Promise<string> {
-    const res = await this.model.invoke([{ role: 'user', content: text }]);
+    const res = await this.model.invoke([{ role: "user", content: text }]);
 
     try {
       // Nếu response có output array
@@ -46,7 +47,7 @@ export class GoogleGenAIClient {
       // Nếu response là plain string hoặc có text/content
       return res?.text ?? res?.content ?? String(res);
     } catch (err) {
-      this.logger.error('Error parsing AI response', err);
+      this.logger.error("Error parsing AI response", err);
       return String(res);
     }
   }
