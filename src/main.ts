@@ -8,6 +8,13 @@ import * as bodyParser from 'body-parser';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  // Stripe webhook cần raw body để verify chữ ký — phải mount TRƯỚC json parser
+  // và dùng path đầy đủ kể cả global prefix.
+  app.use(
+    '/api/payments/stripe/webhook',
+    bodyParser.raw({ type: 'application/json' }),
+  );
+
   app.use(bodyParser.urlencoded({ extended: true }));
   app.use(bodyParser.json());
   // Đặt prefix cho tất cả route
