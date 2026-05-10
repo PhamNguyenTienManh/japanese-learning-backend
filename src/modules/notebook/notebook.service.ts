@@ -59,4 +59,14 @@ export class NotebookService {
         return this.notebook.find({user_id: userId});
     }
 
+    async searchByUserId(userId: string, keyword: string): Promise<Notebook[]> {
+        if (!userId) throw new Error("userId is required");
+        const filter: any = { user_id: userId };
+        if (keyword && keyword.trim()) {
+            const escaped = keyword.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            filter.name = { $regex: escaped, $options: 'i' };
+        }
+        return this.notebook.find(filter).sort({ createdAt: -1 }).exec();
+    }
+
 }
