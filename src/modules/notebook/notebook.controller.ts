@@ -1,4 +1,4 @@
-import { Controller, Param, Post, Body, Put, Get, Res, Req, Delete } from '@nestjs/common';
+import { Controller, Param, Post, Body, Put, Get, Res, Req, Delete, Query } from '@nestjs/common';
 import { NotebookItemService } from '../notebook-item/notebook-item.service';
 import { CreateNotebookDto } from './dto/create-notebook.dto';
 import { Notebook } from './schemas/notebook.schema';
@@ -37,5 +37,11 @@ export class NotebookController {
     async getByUserId(@Req() req:any):Promise<Notebook[]>{
         const id= req.user.sub;
         return this.NotebookService.getByUserId(id);
+    }
+
+    @Get("/search")
+    async searchByUserId(@Req() req: any, @Query('q') keyword: string): Promise<Notebook[]> {
+        const id = req.user.sub;
+        return this.NotebookService.searchByUserId(id, keyword || '');
     }
 }
