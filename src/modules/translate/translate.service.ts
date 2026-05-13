@@ -13,7 +13,7 @@ interface GoogleTranslateResponse {
 
 @Injectable()
 export class TranslateService {
-  private readonly baseUrl = 'http://127.0.0.1:8000';
+  private readonly baseUrl = process.env.ARGOS_TRANSLATE_URL || 'https://minhnguyenminj-quick-translate.hf.space';
   async translate(text: string, source: string, target: string) {
     const url = new URL(
       "https://translation.googleapis.com/language/translate/v2"
