@@ -53,6 +53,9 @@ export class Payment extends Document {
 
   @Prop()
   paidAt?: Date;
+
+  @Prop()
+  invoiceSentAt?: Date;
 }
 
 export const PaymentSchema = SchemaFactory.createForClass(Payment);

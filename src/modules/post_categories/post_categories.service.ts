@@ -22,7 +22,7 @@ export class PostCategoriesService {
     async update(id:string, dto: UpdatePostCategoryDto):Promise<PostCategory>{
         const category = await this.postCategoryModel.findById(id);
         if(!category) throw new NotFoundException("Category not found")
-        
+
         if(dto.name){
             const existed = await this.postCategoryModel.findOne({
                 name: dto.name,
@@ -37,8 +37,37 @@ export class PostCategoriesService {
 
         return category.save();
     }
-    async getAll(): Promise<PostCategory[]>{
-        return this.postCategoryModel.find();
+    async getAll(): Promise<any[]>{
+        return this.postCategoryModel.aggregate([
+            {
+                $lookup: {
+                    from: 'posts',
+                    let: { categoryId: '$_id' },
+                    pipeline: [
+                        {
+                            $match: {
+                                $expr: {
+                                    $and: [
+                                        { $eq: ['$category_id', '$$categoryId'] },
+                                        { $eq: ['$status', 1] },
+                                    ],
+                                },
+                            },
+                        },
+                        { $project: { _id: 1 } },
+                    ],
+                    as: 'posts',
+                },
+            },
+            {
+                $project: {
+                    name: 1,
+                    follow: 1,
+                    count: { $size: '$posts' },
+                },
+            },
+            { $sort: { name: 1 } },
+        ]);
     }
 
 

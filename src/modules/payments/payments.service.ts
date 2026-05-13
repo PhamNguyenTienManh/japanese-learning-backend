@@ -16,6 +16,7 @@ import {
 import { buildMomoCreateBody, verifyMomoSignature } from './momo.helper';
 import { randomUUID } from 'crypto';
 import Stripe from 'stripe';
+import * as nodemailer from 'nodemailer';
 
 // stripe v22 CJS types don't expose the inner `Stripe.Checkout.Session` /
 // `Stripe.Event` namespace directly through the `StripeConstructor` default
@@ -204,6 +205,7 @@ export class PaymentsService {
       payment.paidAt = new Date();
       await payment.save();
       await this.activatePremium(payment.userId.toString(), payment.cycle);
+      await this.sendInvoiceFor(payment);
       return { result: { RspCode: '00', Message: 'Confirm Success' }, payment };
     }
 
@@ -329,6 +331,7 @@ export class PaymentsService {
       payment.paidAt = new Date();
       await payment.save();
       await this.activatePremium(payment.userId.toString(), payment.cycle);
+      await this.sendInvoiceFor(payment);
       return { result: { RspCode: '00', Message: 'Confirm Success' }, payment };
     }
 
@@ -495,6 +498,7 @@ export class PaymentsService {
       payment.paidAt = new Date();
       await payment.save();
       await this.activatePremium(payment.userId.toString(), payment.cycle);
+      await this.sendInvoiceFor(payment);
       return { result: { RspCode: '00', Message: 'Confirm Success' }, payment };
     }
 
@@ -520,6 +524,176 @@ export class PaymentsService {
     }
     const stripe = this.getStripeClient();
     return stripe.webhooks.constructEvent(rawBody, signature, webhookSecret);
+  }
+
+  /**
+   * Build the HTML invoice and email it to the user. Idempotent — uses
+   * `invoiceSentAt` on the payment doc to ensure we never send twice even
+   * if the same callback gets replayed.
+   */
+  private async sendInvoiceFor(payment: Payment): Promise<void> {
+    this.logger.log(`[invoice] start orderId=${payment.orderId}`);
+    try {
+      if (payment.invoiceSentAt) {
+        this.logger.log(
+          `[invoice] skip — already sent at ${payment.invoiceSentAt}`,
+        );
+        return;
+      }
+
+      if (!process.env.MAIL_USER || !process.env.MAIL_PASS) {
+        this.logger.warn(
+          `[invoice] MAIL_USER / MAIL_PASS env not set — skipping email send`,
+        );
+        return;
+      }
+
+      const user = await this.userModel.findById(payment.userId).lean();
+      if (!user?.email) {
+        this.logger.warn(
+          `[invoice] missing email for user ${payment.userId.toString()}`,
+        );
+        return;
+      }
+
+      const transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+          user: process.env.MAIL_USER,
+          pass: process.env.MAIL_PASS,
+        },
+      });
+
+      const subject = `[JAVI] Hoá đơn điện tử #${payment.orderId}`;
+      const html = this.renderInvoiceHtml(payment, user.email);
+
+      const info = await transporter.sendMail({
+        from: 'JAVI <noreply@javi.com>',
+        to: user.email,
+        subject,
+        html,
+      });
+
+      this.logger.log(
+        `[invoice] sent to ${user.email} messageId=${info.messageId}`,
+      );
+
+      await this.paymentModel.updateOne(
+        { _id: payment._id },
+        { invoiceSentAt: new Date() },
+      );
+    } catch (err: any) {
+      this.logger.error(
+        `[invoice] ${payment.orderId} failed: ${err?.message || err}`,
+        err?.stack,
+      );
+    }
+  }
+
+  private renderInvoiceHtml(payment: Payment, email: string): string {
+    const fmtVnd = (n: number) =>
+      new Intl.NumberFormat('vi-VN').format(n) + ' ₫';
+    const cycleLabel =
+      payment.cycle === 'yearly' ? 'Pro · Hằng năm' : 'Pro · Hằng tháng';
+    const providerLabel =
+      ({ vnpay: 'VNPay', momo: 'MoMo', stripe: 'Stripe' } as Record<
+        string,
+        string
+      >)[payment.provider] || payment.provider;
+    const paidAt = (payment.paidAt || new Date()).toLocaleString('vi-VN', {
+      timeZone: 'Asia/Ho_Chi_Minh',
+    });
+
+    return `
+<!doctype html>
+<html lang="vi">
+<body style="margin:0;padding:0;background:#f5f7fa;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;color:#1f2937;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f7fa;padding:32px 12px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;background:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 6px 22px rgba(15,23,42,0.08);">
+          <tr>
+            <td style="background:linear-gradient(135deg,#00879a 0%,#1f9bac 100%);padding:28px 32px;color:#fff;">
+              <div style="font-size:13px;letter-spacing:1px;opacity:0.85;">JAVI · JLEARN</div>
+              <div style="font-size:22px;font-weight:700;margin-top:6px;">Hoá đơn điện tử</div>
+              <div style="font-size:13px;margin-top:4px;opacity:0.85;">Mã đơn: <b>#${payment.orderId}</b></div>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:24px 32px 8px;">
+              <p style="margin:0 0 12px;font-size:14px;line-height:1.6;">
+                Xin chào <b>${email}</b>,
+              </p>
+              <p style="margin:0 0 16px;font-size:14px;line-height:1.6;">
+                Cảm ơn bạn đã nâng cấp gói <b>${cycleLabel}</b>. Đây là biên lai
+                xác nhận giao dịch thành công. Hãy lưu lại để tiện đối chiếu khi
+                cần.
+              </p>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:0 32px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;font-size:14px;">
+                <tr>
+                  <td style="padding:12px 16px;background:#f9fafb;color:#6b7280;width:42%;">Gói dịch vụ</td>
+                  <td style="padding:12px 16px;color:#111827;font-weight:600;">${cycleLabel}</td>
+                </tr>
+                <tr>
+                  <td style="padding:12px 16px;background:#f9fafb;color:#6b7280;border-top:1px solid #e5e7eb;">Phương thức</td>
+                  <td style="padding:12px 16px;color:#111827;border-top:1px solid #e5e7eb;">${providerLabel}</td>
+                </tr>
+                <tr>
+                  <td style="padding:12px 16px;background:#f9fafb;color:#6b7280;border-top:1px solid #e5e7eb;">Thời gian</td>
+                  <td style="padding:12px 16px;color:#111827;border-top:1px solid #e5e7eb;">${paidAt}</td>
+                </tr>
+                ${
+                  payment.transactionNo
+                    ? `<tr>
+                  <td style="padding:12px 16px;background:#f9fafb;color:#6b7280;border-top:1px solid #e5e7eb;">Mã giao dịch</td>
+                  <td style="padding:12px 16px;color:#111827;border-top:1px solid #e5e7eb;font-family:monospace;font-size:13px;">${payment.transactionNo}</td>
+                </tr>`
+                    : ''
+                }
+                ${
+                  payment.bankCode
+                    ? `<tr>
+                  <td style="padding:12px 16px;background:#f9fafb;color:#6b7280;border-top:1px solid #e5e7eb;">Ngân hàng</td>
+                  <td style="padding:12px 16px;color:#111827;border-top:1px solid #e5e7eb;">${payment.bankCode}</td>
+                </tr>`
+                    : ''
+                }
+                <tr>
+                  <td style="padding:14px 16px;background:#f0fdfa;color:#0f766e;font-weight:600;border-top:1px solid #ccfbf1;">Tổng thanh toán</td>
+                  <td style="padding:14px 16px;color:#00879a;font-weight:700;font-size:18px;border-top:1px solid #ccfbf1;">${fmtVnd(payment.amount)}</td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:20px 32px 8px;font-size:13px;color:#4b5563;line-height:1.6;">
+              Quyền lợi gói Pro của bạn đã được kích hoạt. Bạn có thể quay lại
+              <a href="${process.env.FRONTEND_URL || '#'}" style="color:#00879a;text-decoration:none;font-weight:600;">trang chủ JAVI</a>
+              để tiếp tục học.
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:18px 32px 28px;font-size:12px;color:#9ca3af;line-height:1.6;border-top:1px solid #f1f5f9;margin-top:12px;">
+              Đây là email tự động. Nếu có thắc mắc, vui lòng phản hồi email này
+              hoặc liên hệ bộ phận hỗ trợ.
+              <br/>
+              © ${new Date().getFullYear()} JAVI / JLearn — Học tiếng Nhật cùng cộng đồng.
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
   }
 
   private async activatePremium(userId: string, cycle: PaymentCycle) {
