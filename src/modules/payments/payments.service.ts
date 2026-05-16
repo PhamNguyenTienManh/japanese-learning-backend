@@ -383,7 +383,7 @@ export class PaymentsService {
             currency,
             unit_amount: amount,
             product_data: {
-              name: `JLearn Pro ${cycle === 'yearly' ? '(Hằng năm)' : '(Hằng tháng)'}`,
+              name: `JAVI Pro ${cycle === 'yearly' ? '(Hằng năm)' : '(Hằng tháng)'}`,
               description: `Đơn hàng ${orderId}`,
             },
           },
@@ -614,7 +614,7 @@ export class PaymentsService {
         <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;background:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 6px 22px rgba(15,23,42,0.08);">
           <tr>
             <td style="background:linear-gradient(135deg,#00879a 0%,#1f9bac 100%);padding:28px 32px;color:#fff;">
-              <div style="font-size:13px;letter-spacing:1px;opacity:0.85;">JAVI · JLEARN</div>
+              <div style="font-size:13px;letter-spacing:1px;opacity:0.85;">JAVI</div>
               <div style="font-size:22px;font-weight:700;margin-top:6px;">Hoá đơn điện tử</div>
               <div style="font-size:13px;margin-top:4px;opacity:0.85;">Mã đơn: <b>#${payment.orderId}</b></div>
             </td>
@@ -685,7 +685,7 @@ export class PaymentsService {
               Đây là email tự động. Nếu có thắc mắc, vui lòng phản hồi email này
               hoặc liên hệ bộ phận hỗ trợ.
               <br/>
-              © ${new Date().getFullYear()} JAVI / JLearn — Học tiếng Nhật cùng cộng đồng.
+              © ${new Date().getFullYear()} JAVI — Học tiếng Nhật cùng cộng đồng.
             </td>
           </tr>
         </table>

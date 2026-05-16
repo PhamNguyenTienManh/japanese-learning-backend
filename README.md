@@ -1,4 +1,4 @@
-# 📘 Japanese Learning Support System
+# 📘 JAVI
 
 Hệ thống hỗ trợ học tiếng Nhật – Đồ án môn học  
 (Frontend + Backend)
@@ -17,7 +17,7 @@ Hệ thống hỗ trợ học tiếng Nhật – Đồ án môn học
 
 ## 🎯 Giới thiệu dự án
 
-**Japanese Learning Support System** là hệ thống hỗ trợ học tiếng Nhật trực tuyến, giúp người học:
+**JAVI** là hệ thống hỗ trợ học tiếng Nhật trực tuyến, giúp người học:
 - Tra cứu từ vựng, ngữ pháp, Hán tự  
 - Luyện đọc, luyện thi JLPT  
 - Quản lý sổ tay từ vựng  
