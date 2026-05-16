@@ -43,7 +43,7 @@ export class AIChatSession extends Document {
   @Prop({ type: [ChatMessageSchema], default: [] })
   messages: ChatMessage[]; // danh sách tin nhắn
 
-  @Prop({ type: String, default: 'japanese-learning' })
+  @Prop({ type: String, default: 'JAVI' })
   topic?: string; // Chủ đề: grammar, vocabulary, conversation, etc.
 
   @Prop({ type: String, enum: ['N5', 'N4', 'N3', 'N2', 'N1', 'beginner'], default: 'beginner' })

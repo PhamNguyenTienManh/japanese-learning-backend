@@ -50,8 +50,8 @@ export function buildMomoCreateBody(opts: BuildMomoCreateBodyOptions) {
 
   return {
     partnerCode: opts.partnerCode,
-    partnerName: 'JLearn',
-    storeId: 'JLearnStore',
+    partnerName: 'JAVI',
+    storeId: 'JAVIStore',
     requestId: opts.requestId,
     amount: opts.amount,
     orderId: opts.orderId,
