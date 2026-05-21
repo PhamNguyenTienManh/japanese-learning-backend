@@ -3,6 +3,7 @@ import fetch from 'node-fetch';
 import * as fs from 'fs';
 import * as path from 'path';
 import ffmpeg from 'fluent-ffmpeg';
+import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import { v2 as cloudinary } from 'cloudinary';
 import { WaveFile } from 'wavefile';
 import { ConfigService } from '@nestjs/config';
@@ -20,10 +21,7 @@ export class TextToSpeechService {
   private readonly VOICEVOX_URL = 'http://127.0.0.1:50021';
 
   constructor(private config: ConfigService) {
-    const ffmpegPath = this.config.get<string>('FFMPEG_PATH');
-    console.log('FFMPEG PATH from service:', ffmpegPath);
-
-    ffmpeg.setFfmpegPath(ffmpegPath);
+    ffmpeg.setFfmpegPath(ffmpegInstaller.path);
   }
 
   // Tạo file silence bằng Node.js
