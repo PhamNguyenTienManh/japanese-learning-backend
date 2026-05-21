@@ -1,8 +1,7 @@
-import { Body, Controller, Delete, Get, Param, Post, Req, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Req, Res } from '@nestjs/common';
 import type { Response } from 'express';
-import { CreateMessageDto } from './dto/ai-chat.dto';
+import { ConfirmNotebookAddDto, CreateMessageDto, UpdateSessionDto } from './dto/ai-chat.dto';
 import { AiChatSessionsService } from './ai_chat_sessions.service';
-import { Public } from '../auth/public.decorator';
 
 @Controller('ai-chat')
 export class AiChatSessionsController {
@@ -51,7 +50,15 @@ export class AiChatSessionsController {
         res.setHeader('X-Accel-Buffering', 'no');
         res.flushHeaders?.();
 
+        const abortController = new AbortController();
+        let isClosed = false;
+        res.on('close', () => {
+            isClosed = true;
+            abortController.abort();
+        });
+
         const writeEvent = (data: Record<string, any>) => {
+            if (isClosed || res.destroyed) return;
             res.write(`data: ${JSON.stringify(data)}\n\n`);
         };
 
@@ -60,24 +67,18 @@ export class AiChatSessionsController {
                 sessionId,
                 createMessageDto,
                 userId,
+                abortController.signal,
             )) {
+                if (isClosed || res.destroyed) break;
                 writeEvent(event);
             }
         } catch (err: any) {
             writeEvent({ type: 'error', message: err?.message ?? 'Stream failed' });
         } finally {
-            res.end();
+            if (!isClosed && !res.destroyed) {
+                res.end();
+            }
         }
-    }
-
-    /**
-     * GET /ai-chat/:sessionId
-     * Lấy lịch sử chat
-     */
-    @Public()
-    @Get(':sessionId')
-    async getSessionHistory(@Param('sessionId') sessionId: string) {
-        return this.aiChatService.getSessionHistory(sessionId);
     }
 
     /**
@@ -86,6 +87,16 @@ export class AiChatSessionsController {
      */
     @Get('user/sessions')
     async getUserSessions( @Req() req: any) {
+        const userId = req.user.sub;
+        return this.aiChatService.getUserSessions(userId);
+    }
+
+    /**
+     * GET /ai-chat/user/sessions/last
+     * Lấy session mới nhất của user
+     */
+    @Get('user/sessions/last')
+    async getLastUserSession(@Req() req: any) {
         const userId = req.user.sub;
         return this.aiChatService.getLastUserSession(userId);
     }
@@ -100,12 +111,61 @@ export class AiChatSessionsController {
     }
 
     /**
+     * GET /ai-chat/usage/today
+     * Lấy số request AI đã dùng trong ngày theo giờ Hà Nội
+     */
+    @Get('usage/today')
+    async getTodayUsage(@Req() req: any) {
+        const userId = req.user.sub;
+        return this.aiChatService.getTodayUsage(userId);
+    }
+
+    /**
+     * POST /ai-chat/:sessionId/notebook-actions/add-items
+     * Xác nhận/chọn sổ tay từ action UI rồi thêm từ vào sổ tay đó
+     */
+    @Post(':sessionId/notebook-actions/add-items')
+    async addNotebookItemsFromAction(
+        @Param('sessionId') sessionId: string,
+        @Body() body: ConfirmNotebookAddDto,
+        @Req() req: any,
+    ) {
+        const userId = req.user.sub;
+        return this.aiChatService.addNotebookItemsFromAction(sessionId, body, userId);
+    }
+
+    /**
+     * GET /ai-chat/:sessionId
+     * Lấy lịch sử chat
+     */
+    @Get(':sessionId')
+    async getSessionHistory(@Param('sessionId') sessionId: string, @Req() req: any) {
+        const userId = req.user.sub;
+        return this.aiChatService.getSessionHistory(sessionId, userId);
+    }
+
+    /**
+     * PATCH /ai-chat/:sessionId
+     * Đổi tên hoặc ghim session
+     */
+    @Patch(':sessionId')
+    async updateSession(
+        @Param('sessionId') sessionId: string,
+        @Body() updateSessionDto: UpdateSessionDto,
+        @Req() req: any,
+    ) {
+        const userId = req.user.sub;
+        return this.aiChatService.updateSession(sessionId, userId, updateSessionDto);
+    }
+
+    /**
      * DELETE /ai-chat/:sessionId
      * Xóa session
      */
     @Delete(':sessionId')
-    async deleteSession(@Param('sessionId') sessionId: string) {
-        return this.aiChatService.deleteSession(sessionId);
+    async deleteSession(@Param('sessionId') sessionId: string, @Req() req: any) {
+        const userId = req.user.sub;
+        return this.aiChatService.deleteSession(sessionId, userId);
     }
 
     /**
@@ -113,7 +173,8 @@ export class AiChatSessionsController {
      * Đóng session (đánh dấu inactive)
      */
     @Post(':sessionId/close')
-    async closeSession(@Param('sessionId') sessionId: string) {
-        return this.aiChatService.closeSession(sessionId);
+    async closeSession(@Param('sessionId') sessionId: string, @Req() req: any) {
+        const userId = req.user.sub;
+        return this.aiChatService.closeSession(sessionId, userId);
     }
 }

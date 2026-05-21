@@ -1,5 +1,5 @@
 // chat.agent.ts
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable, Logger, NotFoundException } from "@nestjs/common";
 import * as fs from "fs";
 import {
   createNotebookTool,
@@ -8,6 +8,7 @@ import {
   createNamedNotebookTool,
   listUserNotebooksTool,
   getNotebookItemsTool,
+  addGeneratedNotebookItems,
 } from "../tools/notebookTools";
 import { NotebookService } from "src/modules/notebook/notebook.service";
 import { NotebookItemService } from "src/modules/notebook-item/notebook-item.service";
@@ -24,7 +25,7 @@ import {
   InMemoryChatMessageHistory,
   BaseChatMessageHistory,
 } from "@langchain/core/chat_history";
-import { SystemMessage, HumanMessage } from "@langchain/core/messages";
+import { AIMessage, HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { GoogleGenAIClient } from "../provider/googleGenAIClient";
 import { ToolInterface } from "@langchain/core/tools";
 import { NotebookAIService } from "../service/notebook-ai.service";
@@ -75,6 +76,24 @@ export class ChatAgent {
     const history = new InMemoryChatMessageHistory();
     this.histories.set(sessionId, history);
     return history;
+  }
+
+  private async seedHistory(
+    sessionId: string,
+    messages: ChatMessage[] = [],
+  ): Promise<void> {
+    const history = this.getHistory(sessionId);
+
+    await history.clear();
+    await history.addMessages(
+      messages
+        .filter((message) => message?.content)
+        .map((message) =>
+          message.role === "user"
+            ? new HumanMessage(message.content)
+            : new AIMessage(message.content),
+        ),
+    );
   }
 
   /**
@@ -180,6 +199,7 @@ export class ChatAgent {
     userMessage: string,
     sessionId: string,
     userId: string,
+    contextMessages: ChatMessage[] = [],
   ): Promise<string> {
     if (!sessionId) {
       this.logger.error("sessionId is missing");
@@ -191,6 +211,7 @@ export class ChatAgent {
     }
 
     const withHistory = this.buildWithHistory(userId);
+    await this.seedHistory(sessionId, contextMessages);
 
     // Ép userMessage thành string an toàn
     const safeInput =
@@ -250,11 +271,14 @@ export class ChatAgent {
     userMessage: string,
     sessionId: string,
     userId: string,
+    contextMessages: ChatMessage[] = [],
+    signal?: AbortSignal,
   ): AsyncGenerator<StreamReplyEvent, void, void> {
     if (!sessionId) throw new Error("sessionId is required");
     if (!userId) throw new Error("userId is required");
 
     const withHistory = this.buildWithHistory(userId);
+    await this.seedHistory(sessionId, contextMessages);
 
     const safeInput =
       typeof userMessage === "string" ? userMessage : String(userMessage);
@@ -262,11 +286,14 @@ export class ChatAgent {
     const config = {
       configurable: { sessionId },
       version: "v2" as const,
+      signal,
     };
 
     const eventStream = withHistory.streamEvents(payload, config);
 
     for await (const event of eventStream) {
+      if (signal?.aborted) return;
+
       if (event.event === "on_chat_model_stream") {
         const chunk: any = (event as any).data?.chunk;
         const content = chunk?.content;
@@ -308,6 +335,34 @@ export class ChatAgent {
         yield { kind: "tool", toolName, output: parsed };
       }
     }
+  }
+
+  public async addItemsToNotebook(
+    userId: string,
+    notebookId: string,
+    prompt: string,
+  ) {
+    if (!userId) throw new Error("userId is required");
+    if (!notebookId) throw new Error("notebookId is required");
+    if (!prompt) throw new Error("prompt is required");
+
+    const notebooks = await this.notebookService.findByUserId(userId);
+    const notebook = notebooks.find((nb) => nb.id.toString() === notebookId);
+    if (!notebook) {
+      throw new NotFoundException("Không tìm thấy sổ tay của bạn");
+    }
+
+    const result = await addGeneratedNotebookItems(
+      this.notebookAIService,
+      this.notebookItemService,
+      notebookId,
+      prompt,
+    );
+
+    return {
+      ...result,
+      notebookName: notebook.name,
+    };
   }
 }
 
