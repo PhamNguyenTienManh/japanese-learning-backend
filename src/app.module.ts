@@ -36,7 +36,9 @@ import { RolesGuard } from "./modules/auth/roles.guard";
 import { UploadModule } from "./modules/upload/upload.module";
 import { TextToSpeechModule } from "./modules/text_to_speech/text_to_speech.module";
 import { CacheModule } from "@nestjs/cache-manager";
+import { KeyvAdapter } from "cache-manager";
 import { redisStore } from "cache-manager-redis-yet";
+import { Keyv } from "keyv";
 import { RedisModule } from "./redis.module";
 import { ContributionModule } from "./modules/contribution/contribution.module";
 import { UserStudyDayModule } from "./modules/user_study_day/user_study_day.modules";
@@ -103,9 +105,15 @@ import { PaymentsModule } from "./modules/payments/payments.module";
         }
 
         return {
-          store: await redisStore({
-            url: process.env.REDIS_URL,
-          }),
+          stores: [
+            new Keyv({
+              store: new KeyvAdapter(
+                await redisStore({
+                  url: process.env.REDIS_URL,
+                }),
+              ),
+            }),
+          ],
           ttl: 0,
         };
       },

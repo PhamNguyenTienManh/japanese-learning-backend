@@ -30,6 +30,9 @@ import {
   JlptGrammarSchema,
 } from "../jlpt_grammar/schemas/jlpt_grammar.schema";
 import { Posts, PostSchema } from "../posts/schemas/posts.schema";
+import { Comment, CommentSchema } from "../comments/schemas/comments.schema";
+import { Payment, PaymentSchema } from "../payments/schemas/payment.schema";
+import { User, UserSchema } from "../users/schemas/user.schema";
 
 @Module({
   imports: [
@@ -44,6 +47,9 @@ import { Posts, PostSchema } from "../posts/schemas/posts.schema";
       { name: JlptWord.name, schema: JlptWordSchema },
       { name: JlptGrammar.name, schema: JlptGrammarSchema },
       { name: Posts.name, schema: PostSchema },
+      { name: Comment.name, schema: CommentSchema },
+      { name: Payment.name, schema: PaymentSchema },
+      { name: User.name, schema: UserSchema },
     ]),
   ],
   providers: [StatisticService],

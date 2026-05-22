@@ -17,6 +17,7 @@ import {
 import { AIChatDailyUsage } from "./schemas/ai_chat_daily_usage.schema";
 import { ConfirmNotebookAddDto, CreateMessageDto } from "./dto/ai-chat.dto";
 import { ChatAgent } from "../ai/agent/chat.agent";
+import { AiLangfuseTracingService } from "../ai/service/ai-langfuse-tracing.service";
 
 const DAILY_AI_LIMIT = 50;
 const DAILY_AI_LIMIT_CODE = "DAILY_AI_LIMIT_EXCEEDED";
@@ -114,6 +115,73 @@ function buildNotebookActions(
   ];
 }
 
+function isNotebookChoiceResolvedByAdd(
+  action: ChatMessageAction,
+  updatedNotebookIds: Set<string>,
+) {
+  if (
+    action.type !== "confirm_add_to_notebook" &&
+    action.type !== "select_notebook_for_add"
+  ) {
+    return false;
+  }
+
+  if (action.notebookId && updatedNotebookIds.has(action.notebookId)) {
+    return true;
+  }
+
+  return (
+    Array.isArray(action.candidates) &&
+    action.candidates.some((candidate) => updatedNotebookIds.has(candidate.id))
+  );
+}
+
+function mergeNotebookActions(
+  currentActions: ChatMessageAction[],
+  toolName: string,
+  newActions: ChatMessageAction[],
+) {
+  if (toolName === "add_notebook_items") {
+    const updatedNotebookIds = new Set(
+      newActions
+        .filter(
+          (action) => action.type === "view_notebook" && action.notebookId,
+        )
+        .map((action) => action.notebookId as string),
+    );
+
+    if (updatedNotebookIds.size > 0) {
+      for (let index = currentActions.length - 1; index >= 0; index -= 1) {
+        if (
+          isNotebookChoiceResolvedByAdd(
+            currentActions[index],
+            updatedNotebookIds,
+          )
+        ) {
+          currentActions.splice(index, 1);
+        }
+      }
+    }
+  }
+
+  const addedActions: ChatMessageAction[] = [];
+
+  for (const action of newActions) {
+    const exists = currentActions.some(
+      (currentAction) =>
+        currentAction.notebookId === action.notebookId &&
+        currentAction.type === action.type,
+    );
+
+    if (!exists) {
+      currentActions.push(action);
+      addedActions.push(action);
+    }
+  }
+
+  return addedActions;
+}
+
 @Injectable()
 export class AiChatSessionsService {
   constructor(
@@ -121,7 +189,8 @@ export class AiChatSessionsService {
     private aiChatSessionModel: Model<AIChatSession>,
     @InjectModel(AIChatDailyUsage.name)
     private aiChatDailyUsageModel: Model<AIChatDailyUsage>,
-    private readonly chatAgent: ChatAgent
+    private readonly chatAgent: ChatAgent,
+    private readonly aiLangfuseTracing: AiLangfuseTracingService,
   ) {}
 
   private readonly logger = new Logger(AiChatSessionsService.name);
@@ -359,12 +428,26 @@ export class AiChatSessionsService {
 
     try {
       // GỌI CHAT AGENT
-      const aiResponse = await this.chatAgent.chatReply(
-        session.messages, // messages
-        createMessageDto.content, // userMessage
-        sessionId, // sessionId
-        userId, // userId
-        contextMessages,
+      const aiResponse = await this.aiLangfuseTracing.runChatObservation(
+        {
+          workflow: "message",
+          userId,
+          sessionId,
+          input: {
+            messages: [...contextMessages, userMsg],
+          },
+        },
+        () =>
+          this.chatAgent.chatReply(
+            session.messages, // messages
+            createMessageDto.content, // userMessage
+            sessionId, // sessionId
+            userId, // userId
+            contextMessages,
+          ),
+        (response) => ({
+          aiMessage: response,
+        }),
       );
 
       // Lưu message AI
@@ -434,6 +517,24 @@ export class AiChatSessionsService {
     let fullText = "";
     const actions: ChatMessageAction[] = [];
     let wasAborted = false;
+    const chatTrace = this.aiLangfuseTracing.startChatObservation({
+      workflow: "stream",
+      userId,
+      sessionId,
+      input: {
+        messages: [...contextMessages, userMsg],
+      },
+    });
+    let traceEnded = false;
+    const finishTrace = (output: Record<string, any>) => {
+      chatTrace.finish(output);
+      traceEnded = true;
+    };
+    const failTrace = (error: unknown, output?: Record<string, any>) => {
+      chatTrace.fail(error, output);
+      traceEnded = true;
+    };
+
     try {
       for await (const evt of this.chatAgent.streamReply(
         createMessageDto.content,
@@ -455,15 +556,14 @@ export class AiChatSessionsService {
           NOTEBOOK_TOOL_NAMES.has(evt.toolName)
         ) {
           const newActions = buildNotebookActions(evt.toolName, evt.output);
-          for (const action of newActions) {
-            const exists = actions.some(
-              (a) =>
-                a.notebookId === action.notebookId && a.type === action.type,
-            );
-            if (!exists) {
-              actions.push(action);
-              yield { type: "action", action };
-            }
+          const addedActions = mergeNotebookActions(
+            actions,
+            evt.toolName,
+            newActions,
+          );
+
+          for (const action of addedActions) {
+            yield { type: "action", action };
           }
         }
       }
@@ -485,6 +585,11 @@ export class AiChatSessionsService {
       };
       session.messages.push(aiMsg);
       await session.save();
+      finishTrace({
+        status: wasAborted ? "aborted" : "done",
+        aiMessage: aiMsg.content,
+        actions,
+      });
 
       yield {
         type: wasAborted ? "aborted" : "done",
@@ -514,6 +619,11 @@ export class AiChatSessionsService {
           session.messages.push(aiMsg);
         }
         await session.save();
+        finishTrace({
+          status: "aborted",
+          aiMessage: fullText || "Đã dừng phản hồi.",
+          actions,
+        });
         return;
       }
 
@@ -534,10 +644,23 @@ export class AiChatSessionsService {
       }
 
       this.logger.error("Failed to stream AI response", error);
+      failTrace(error, {
+        status: "error",
+        partialAiMessage: fullText || null,
+        actions,
+      });
       yield {
         type: "error",
         message: "AI service unavailable",
       };
+    } finally {
+      if (!traceEnded) {
+        finishTrace({
+          status: signal?.aborted ? "aborted" : "closed",
+          partialAiMessage: fullText || null,
+          actions,
+        });
+      }
     }
   }
 
@@ -565,10 +688,29 @@ export class AiChatSessionsService {
       );
     }
 
-    const result = await this.chatAgent.addItemsToNotebook(
-      userId,
-      payload.notebookId,
-      payload.prompt,
+    const result = await this.aiLangfuseTracing.runChatObservation(
+      {
+        workflow: "notebook-action",
+        userId,
+        sessionId,
+        input: {
+          notebookId: payload.notebookId,
+          prompt: payload.prompt,
+        },
+      },
+      () =>
+        this.chatAgent.addItemsToNotebook(
+          userId,
+          payload.notebookId,
+          payload.prompt,
+        ),
+      (response) => ({
+        notebookId: response?.notebookId,
+        notebookName: response?.notebookName,
+        itemsCount: response?.itemsCount,
+        requestedCount: response?.requestedCount,
+        success: response?.success,
+      }),
     );
     const notebookName = result?.notebookName || "sổ tay đã chọn";
 

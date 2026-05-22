@@ -18,4 +18,10 @@ export class StatisticController {
   async getStats() {
     return this.statisticService.getStatistics();
   }
+
+  @Get("admin-dashboard")
+  @Roles("admin")
+  async getAdminDashboard() {
+    return this.statisticService.getAdminDashboard();
+  }
 }

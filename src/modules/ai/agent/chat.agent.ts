@@ -29,6 +29,7 @@ import { AIMessage, HumanMessage, SystemMessage } from "@langchain/core/messages
 import { GoogleGenAIClient } from "../provider/googleGenAIClient";
 import { ToolInterface } from "@langchain/core/tools";
 import { NotebookAIService } from "../service/notebook-ai.service";
+import { AiLangfuseTracingService } from "../service/ai-langfuse-tracing.service";
 
 export type ChatRole = "user" | "ai";
 
@@ -50,6 +51,7 @@ export class ChatAgent {
     private readonly notebookAIService: NotebookAIService,
     private readonly notebookService: NotebookService,
     private readonly notebookItemService: NotebookItemService,
+    private readonly aiLangfuseTracing: AiLangfuseTracingService,
   ) {
     this.systemPrompt = this.loadSystemPrompt();
   }
@@ -223,6 +225,17 @@ export class ChatAgent {
       configurable: {
         sessionId,
       },
+      callbacks: this.aiLangfuseTracing.createLangChainCallbacks({
+        userId,
+        sessionId,
+        workflow: "message",
+      }),
+      metadata: {
+        langfuseUserId: userId,
+        langfuseSessionId: sessionId,
+      },
+      runName: "ai-chat-langchain-message",
+      tags: ["ai-chat", "message"],
     };
 
     try {
@@ -255,8 +268,14 @@ export class ChatAgent {
       // return typeof output === "string" ? output : JSON.stringify(output);
     } catch (err) {
       this.logger.error("[ChatAgent] Failed to generate response");
-      this.logger.error("Error:", err.message);
-      this.logger.error("Stack:", err.stack);
+      
+      if (err instanceof Error) {
+        this.logger.error("Error:", err.message);
+        this.logger.error("Stack:", err.stack);
+      } else {
+        this.logger.error("Error:", String(err));
+      }
+      
       throw err;
     }
   }
@@ -287,6 +306,17 @@ export class ChatAgent {
       configurable: { sessionId },
       version: "v2" as const,
       signal,
+      callbacks: this.aiLangfuseTracing.createLangChainCallbacks({
+        userId,
+        sessionId,
+        workflow: "stream",
+      }),
+      metadata: {
+        langfuseUserId: userId,
+        langfuseSessionId: sessionId,
+      },
+      runName: "ai-chat-langchain-stream",
+      tags: ["ai-chat", "stream"],
     };
 
     const eventStream = withHistory.streamEvents(payload, config);
