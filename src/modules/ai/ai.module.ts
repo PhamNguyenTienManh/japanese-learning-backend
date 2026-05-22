@@ -12,6 +12,7 @@ import { ChatAgent } from "./agent/chat.agent";
 import { NotebookAgent } from "./agent/notebook.agent";
 import { GoogleGenAIClient } from "./provider/googleGenAIClient";
 import { NotebookAIService } from "./service/notebook-ai.service";
+import { AiLangfuseTracingService } from "./service/ai-langfuse-tracing.service";
 
 @Module({
   imports: [
@@ -28,7 +29,13 @@ import { NotebookAIService } from "./service/notebook-ai.service";
     NotebookService,
     NotebookItemService,
     NotebookAIService,
+    AiLangfuseTracingService,
   ],
-  exports: [GeminiProvider, ChatAgent, GoogleGenAIClient],
+  exports: [
+    GeminiProvider,
+    ChatAgent,
+    GoogleGenAIClient,
+    AiLangfuseTracingService,
+  ],
 })
 export class AiModule {}

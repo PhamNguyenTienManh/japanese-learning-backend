@@ -1,3 +1,4 @@
+import { shutdownLangfuseTracing } from "./instrumentation";
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
@@ -31,6 +32,13 @@ async function bootstrap() {
   app.useGlobalPipes(new ValidationPipe({
     whitelist: true,
   }));
+  app.enableShutdownHooks();
+  process.once("SIGTERM", () => {
+    void shutdownLangfuseTracing();
+  });
+  process.once("SIGINT", () => {
+    void shutdownLangfuseTracing();
+  });
   console.log("TEST ENV FFMPEG:", process.env.FFMPEG_PATH);
   await app.listen(process.env.PORT ?? 9090);
 }
