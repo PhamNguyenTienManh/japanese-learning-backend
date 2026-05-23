@@ -45,7 +45,6 @@ export class AuthService {
     let user = await this.usersService.findByEmail(email);
 
     if (!user) {
-      // Tạo user mới
       user = (await this.usersService.create({
         email,
         provider: "google",
@@ -219,8 +218,12 @@ export class AuthService {
     });
   }
 
-  async logout(token: string) {
+  async logout(token?: string) {
     try {
+      if (!token) {
+        throw new BadRequestException("Token không hợp lệ");
+      }
+
       const decoded = this.jwtService.decode(token) as any;
       if (!decoded || !decoded.jti) {
         throw new BadRequestException("Token không hợp lệ");
