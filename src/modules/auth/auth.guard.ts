@@ -10,9 +10,9 @@ import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import { jwtConstants } from './constants';
 import { IS_PUBLIC_KEY } from './public.decorator';
-import { Request } from 'express';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import type { Cache } from 'cache-manager';
+import { extractAuthToken } from './auth-cookie';
 
 
 @Injectable()
@@ -34,7 +34,7 @@ export class AuthGuard implements CanActivate {
     }
 
     const request = context.switchToHttp().getRequest();
-    const token = this.extractTokenFromHeader(request);
+    const token = extractAuthToken(request);
     if (!token) {
       throw new UnauthorizedException();
     }
@@ -55,8 +55,4 @@ export class AuthGuard implements CanActivate {
     return true;
   }
 
-  private extractTokenFromHeader(request: Request): string | undefined {
-    const [type, token] = request.headers.authorization?.split(' ') ?? [];
-    return type === 'Bearer' ? token : undefined;
-  }
 }
