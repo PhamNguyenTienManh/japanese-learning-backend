@@ -10,11 +10,14 @@ import { Model, Types } from 'mongoose';
 import { User } from '../users/schemas/user.schema';
 import { Payment, PaymentCycle } from './schemas/payment.schema';
 import {
-  buildVnpayPaymentUrl,
-  verifyVnpaySignature,
-} from './vnpay.helper';
-import { buildMomoCreateBody, verifyMomoSignature } from './momo.helper';
-import { randomUUID } from 'crypto';
+  buildZalopayAppTransId,
+  buildZalopayCreateBody,
+  buildZalopayQueryBody,
+  extractOrderIdFromZalopayAppTransId,
+  parseZalopayCallbackData,
+  verifyZalopayCallback,
+  verifyZalopayRedirect,
+} from './zalopay.helper';
 import Stripe from 'stripe';
 import * as nodemailer from 'nodemailer';
 
@@ -48,38 +51,35 @@ export class PaymentsService {
     private readonly config: ConfigService,
   ) {}
 
-  private getVnpayConfig() {
-    const tmnCode = this.config.get<string>('VNPAY_TMN_CODE');
-    const hashSecret = this.config.get<string>('VNPAY_HASH_SECRET');
-    const vnpUrl =
-      this.config.get<string>('VNPAY_URL') ||
-      'https://sandbox.vnpayment.vn/paymentv2/vnpayment.html';
-    const returnUrl = this.config.get<string>('VNPAY_RETURN_URL');
+  private getZalopayConfig() {
+    const appId = this.config.get<string>('ZALOPAY_APP_ID');
+    const key1 = this.config.get<string>('ZALOPAY_KEY1');
+    const key2 = this.config.get<string>('ZALOPAY_KEY2');
+    const createEndpoint =
+      this.config.get<string>('ZALOPAY_CREATE_ENDPOINT') ||
+      'https://sb-openapi.zalopay.vn/v2/create';
+    const queryEndpoint =
+      this.config.get<string>('ZALOPAY_QUERY_ENDPOINT') ||
+      'https://sb-openapi.zalopay.vn/v2/query';
+    const callbackUrl = this.config.get<string>('ZALOPAY_CALLBACK_URL');
+    const returnUrl = this.config.get<string>('ZALOPAY_RETURN_URL');
+    const bankCode = this.config.get<string>('ZALOPAY_BANK_CODE') ?? 'zalopayapp';
 
-    if (!tmnCode || !hashSecret || !returnUrl) {
+    if (!appId || !key1 || !key2 || !callbackUrl || !returnUrl) {
       throw new Error(
-        'VNPAY_TMN_CODE, VNPAY_HASH_SECRET and VNPAY_RETURN_URL must be set',
+        'ZALOPAY_APP_ID, ZALOPAY_KEY1, ZALOPAY_KEY2, ZALOPAY_CALLBACK_URL and ZALOPAY_RETURN_URL must be set',
       );
     }
-    return { tmnCode, hashSecret, vnpUrl, returnUrl };
-  }
-
-  private getMomoConfig() {
-    const partnerCode = this.config.get<string>('MOMO_PARTNER_CODE');
-    const accessKey = this.config.get<string>('MOMO_ACCESS_KEY');
-    const secretKey = this.config.get<string>('MOMO_SECRET_KEY');
-    const endpoint =
-      this.config.get<string>('MOMO_ENDPOINT') ||
-      'https://test-payment.momo.vn/v2/gateway/api/create';
-    const redirectUrl = this.config.get<string>('MOMO_RETURN_URL');
-    const ipnUrl = this.config.get<string>('MOMO_IPN_URL');
-
-    if (!partnerCode || !accessKey || !secretKey || !redirectUrl || !ipnUrl) {
-      throw new Error(
-        'MOMO_PARTNER_CODE, MOMO_ACCESS_KEY, MOMO_SECRET_KEY, MOMO_RETURN_URL and MOMO_IPN_URL must be set',
-      );
-    }
-    return { partnerCode, accessKey, secretKey, endpoint, redirectUrl, ipnUrl };
+    return {
+      appId,
+      key1,
+      key2,
+      createEndpoint,
+      queryEndpoint,
+      callbackUrl,
+      returnUrl,
+      bankCode,
+    };
   }
 
   private getStripeConfig() {
@@ -104,7 +104,6 @@ export class PaymentsService {
   }
 
   private genOrderId(): string {
-    // yyyyMMddHHmmss + 4 random digits, fits well within VNPay's 100-char limit
     const d = new Date();
     const pad = (n: number) => String(n).padStart(2, '0');
     const stamp =
@@ -114,110 +113,7 @@ export class PaymentsService {
     return `${stamp}${rand}`;
   }
 
-  async createVnpayPayment(
-    userId: string,
-    cycle: PaymentCycle,
-    ipAddr: string,
-    bankCode?: string,
-  ): Promise<{ paymentUrl: string; orderId: string; amount: number }> {
-    const amount = PRICE_BY_CYCLE[cycle];
-    if (!amount) {
-      throw new BadRequestException('Invalid cycle');
-    }
-
-    const { tmnCode, hashSecret, vnpUrl, returnUrl } = this.getVnpayConfig();
-    const orderId = this.genOrderId();
-
-    await this.paymentModel.create({
-      userId: new Types.ObjectId(userId),
-      orderId,
-      amount,
-      cycle,
-      plan: 'Pro',
-      provider: 'vnpay',
-      status: 'pending',
-      ipAddr,
-    });
-
-    const paymentUrl = buildVnpayPaymentUrl({
-      tmnCode,
-      hashSecret,
-      vnpUrl,
-      returnUrl,
-      amount,
-      orderId,
-      orderInfo: `Thanh toan goi Pro ${cycle === 'yearly' ? 'nam' : 'thang'}: ${orderId}`,
-      ipAddr,
-      bankCode,
-    });
-
-    return { paymentUrl, orderId, amount };
-  }
-
-  /**
-   * Process a VNPay return / IPN payload. Idempotent: re-running for an
-   * already-success payment returns success without touching the user again.
-   */
-  async processVnpayCallback(
-    query: Record<string, any>,
-  ): Promise<{ result: IpnResult; payment?: Payment }> {
-    const { hashSecret } = this.getVnpayConfig();
-
-    if (!verifyVnpaySignature(query, hashSecret)) {
-      return { result: { RspCode: '97', Message: 'Invalid signature' } };
-    }
-
-    const orderId = String(query.vnp_TxnRef || '');
-    const responseCode = String(query.vnp_ResponseCode || '');
-    const transactionStatus = String(query.vnp_TransactionStatus || '');
-    const amountFromVnp = Number(query.vnp_Amount || 0);
-
-    const payment = await this.paymentModel.findOne({ orderId });
-    if (!payment) {
-      return { result: { RspCode: '01', Message: 'Order not found' } };
-    }
-
-    if (Math.round(payment.amount * 100) !== amountFromVnp) {
-      return { result: { RspCode: '04', Message: 'Invalid amount' } };
-    }
-
-    if (payment.status === 'success') {
-      return {
-        result: { RspCode: '02', Message: 'Order already confirmed' },
-        payment,
-      };
-    }
-
-    payment.responseCode = responseCode;
-    payment.transactionNo = query.vnp_TransactionNo
-      ? String(query.vnp_TransactionNo)
-      : undefined;
-    payment.bankCode = query.vnp_BankCode
-      ? String(query.vnp_BankCode)
-      : undefined;
-    payment.payDate = query.vnp_PayDate
-      ? String(query.vnp_PayDate)
-      : undefined;
-    payment.raw = query;
-
-    if (responseCode === '00' && transactionStatus === '00') {
-      payment.status = 'success';
-      payment.paidAt = new Date();
-      await payment.save();
-      await this.activatePremium(payment.userId.toString(), payment.cycle);
-      await this.sendInvoiceFor(payment);
-      return { result: { RspCode: '00', Message: 'Confirm Success' }, payment };
-    }
-
-    payment.status = 'failed';
-    await payment.save();
-    return {
-      result: { RspCode: '00', Message: 'Confirm Success' },
-      payment,
-    };
-  }
-
-  async createMomoPayment(
+  async createZalopayPayment(
     userId: string,
     cycle: PaymentCycle,
     ipAddr: string,
@@ -228,17 +124,31 @@ export class PaymentsService {
     }
 
     const {
-      partnerCode,
-      accessKey,
-      secretKey,
-      endpoint,
-      redirectUrl,
-      ipnUrl,
-    } = this.getMomoConfig();
+      appId,
+      key1,
+      createEndpoint,
+      callbackUrl,
+      returnUrl,
+      bankCode,
+    } = this.getZalopayConfig();
 
     const orderId = this.genOrderId();
-    const requestId = randomUUID();
-    const orderInfo = `Thanh toan goi Pro ${cycle === 'yearly' ? 'nam' : 'thang'}: ${orderId}`;
+    const appTransId = buildZalopayAppTransId(orderId);
+    const appTime = Date.now();
+    const item = JSON.stringify([
+      {
+        itemid: `javi-pro-${cycle}`,
+        itemname: `JAVI Pro ${cycle}`,
+        itemprice: amount,
+        itemquantity: 1,
+      },
+    ]);
+    const embedData = JSON.stringify({
+      redirecturl: returnUrl,
+      preferred_payment_method: ['zalopay_wallet'],
+      orderId,
+      cycle,
+    });
 
     await this.paymentModel.create({
       userId: new Types.ObjectId(userId),
@@ -246,71 +156,108 @@ export class PaymentsService {
       amount,
       cycle,
       plan: 'Pro',
-      provider: 'momo',
+      provider: 'zalopay',
       status: 'pending',
       ipAddr,
+      raw: { appTransId },
     });
 
-    const body = buildMomoCreateBody({
-      partnerCode,
-      accessKey,
-      secretKey,
-      requestId,
-      orderId,
+    const body = buildZalopayCreateBody({
+      appId,
+      key1,
+      appTransId,
+      appUser: userId,
+      appTime,
       amount,
-      orderInfo,
-      redirectUrl,
-      ipnUrl,
+      item,
+      embedData,
+      description: `JAVI - Thanh toán gói Pro ${cycle === 'yearly' ? 'năm' : 'tháng'} #${orderId}`,
+      bankCode,
+      callbackUrl,
     });
 
-    const response = await fetch(endpoint, {
+    const form = new URLSearchParams();
+    Object.entries(body).forEach(([key, value]) => {
+      form.set(key, String(value));
+    });
+
+    const response = await fetch(createEndpoint, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: form.toString(),
     });
 
     const data: any = await response.json().catch(() => ({}));
-    if (!response.ok || data.resultCode !== 0 || !data.payUrl) {
+    if (!response.ok || Number(data.return_code) !== 1 || !data.order_url) {
       this.logger.error(
-        `MoMo create failed: ${JSON.stringify(data)} (HTTP ${response.status})`,
+        `ZaloPay create failed: ${JSON.stringify(data)} (HTTP ${response.status})`,
       );
       await this.paymentModel.updateOne(
         { orderId },
-        { status: 'failed', raw: data },
+        { status: 'failed', raw: { appTransId, createResponse: data } },
       );
       throw new BadRequestException(
-        data.message || 'MoMo payment creation failed',
+        data.return_message || 'ZaloPay payment creation failed',
       );
     }
 
-    return { paymentUrl: data.payUrl as string, orderId, amount };
+    await this.paymentModel.updateOne(
+      { orderId },
+      { raw: { appTransId, createResponse: data } },
+    );
+
+    return { paymentUrl: String(data.order_url), orderId, amount };
   }
 
-  /**
-   * Process a MoMo redirect/IPN payload. Idempotent like the VNPay variant.
-   * Returns a generic IpnResult; the controller maps it to the format each
-   * channel expects (HTTP 204 for IPN, redirect for the browser return).
-   */
-  async processMomoCallback(
+  async processZalopayCallback(
     body: Record<string, any>,
   ): Promise<{ result: IpnResult; payment?: Payment }> {
-    const { accessKey, secretKey } = this.getMomoConfig();
+    const { key2 } = this.getZalopayConfig();
 
-    if (!verifyMomoSignature(body, accessKey, secretKey)) {
+    if (!verifyZalopayCallback(body, key2)) {
       return { result: { RspCode: '97', Message: 'Invalid signature' } };
     }
 
-    const orderId = String(body.orderId || '');
-    const resultCode = Number(body.resultCode);
-    const amountFromMomo = Number(body.amount || 0);
+    let data: Record<string, any>;
+    try {
+      data = parseZalopayCallbackData(body);
+    } catch {
+      return { result: { RspCode: '99', Message: 'Invalid callback data' } };
+    }
 
+    const appTransId = String(data.app_trans_id || '');
+    const orderId = extractOrderIdFromZalopayAppTransId(appTransId);
     const payment = await this.paymentModel.findOne({ orderId });
     if (!payment) {
       return { result: { RspCode: '01', Message: 'Order not found' } };
     }
 
-    if (payment.amount !== amountFromMomo) {
-      return { result: { RspCode: '04', Message: 'Invalid amount' } };
+    return this.confirmZalopayPayment(payment, data, {
+      ...(payment.raw || {}),
+      callback: body,
+      callbackData: data,
+    });
+  }
+
+  async processZalopayReturn(
+    query: Record<string, any>,
+  ): Promise<{ result: IpnResult; payment?: Payment }> {
+    const { key2 } = this.getZalopayConfig();
+
+    if (!verifyZalopayRedirect(query, key2)) {
+      return { result: { RspCode: '97', Message: 'Invalid signature' } };
+    }
+
+    const appTransId = String(query.apptransid || '');
+    const orderId = extractOrderIdFromZalopayAppTransId(appTransId);
+    const payment = await this.paymentModel.findOne({ orderId });
+    if (!payment) {
+      return { result: { RspCode: '01', Message: 'Order not found' } };
+    }
+
+    const amountFromZalopay = Number(query.amount || 0);
+    if (amountFromZalopay && amountFromZalopay !== payment.amount) {
+      return { result: { RspCode: '04', Message: 'Invalid amount' }, payment };
     }
 
     if (payment.status === 'success') {
@@ -320,27 +267,111 @@ export class PaymentsService {
       };
     }
 
-    payment.responseCode = String(resultCode);
-    payment.transactionNo = body.transId ? String(body.transId) : undefined;
-    payment.bankCode = body.payType ? String(body.payType) : undefined;
-    payment.payDate = body.responseTime ? String(body.responseTime) : undefined;
-    payment.raw = body;
+    payment.responseCode = String(query.status ?? '');
+    payment.bankCode = query.bankcode ? String(query.bankcode) : payment.bankCode;
+    payment.raw = { ...(payment.raw || {}), redirect: query };
 
-    if (resultCode === 0) {
-      payment.status = 'success';
-      payment.paidAt = new Date();
+    if (Number(query.status) !== 1) {
+      payment.status = 'failed';
       await payment.save();
-      await this.activatePremium(payment.userId.toString(), payment.cycle);
-      await this.sendInvoiceFor(payment);
       return { result: { RspCode: '00', Message: 'Confirm Success' }, payment };
     }
 
-    payment.status = 'failed';
+    try {
+      const status = await this.queryZalopayOrderStatus(appTransId);
+      return this.applyZalopayStatus(payment, status, query);
+    } catch (err: any) {
+      this.logger.error(
+        `ZaloPay status lookup failed: ${err?.message || err}`,
+        err?.stack,
+      );
+      await payment.save();
+      return {
+        result: { RspCode: '99', Message: 'ZaloPay status lookup failed' },
+        payment,
+      };
+    }
+  }
+
+  private async queryZalopayOrderStatus(appTransId: string) {
+    const { appId, key1, queryEndpoint } = this.getZalopayConfig();
+    const body = buildZalopayQueryBody({ appId, key1, appTransId });
+    const form = new URLSearchParams();
+    Object.entries(body).forEach(([key, value]) => {
+      form.set(key, String(value));
+    });
+
+    const response = await fetch(queryEndpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: form.toString(),
+    });
+
+    const data: any = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${JSON.stringify(data)}`);
+    }
+    return data;
+  }
+
+  private async applyZalopayStatus(
+    payment: Payment,
+    status: Record<string, any>,
+    redirect: Record<string, any>,
+  ): Promise<{ result: IpnResult; payment?: Payment }> {
+    payment.responseCode = String(status.return_code ?? '');
+    payment.transactionNo = status.zp_trans_id
+      ? String(status.zp_trans_id)
+      : payment.transactionNo;
+    payment.raw = { ...(payment.raw || {}), redirect, status };
+
+    if (Number(status.return_code) === 1) {
+      return this.confirmZalopayPayment(payment, status, payment.raw);
+    }
+
+    if (Number(status.return_code) === 2) {
+      payment.status = 'failed';
+      await payment.save();
+      return { result: { RspCode: '00', Message: 'Confirm Success' }, payment };
+    }
+
     await payment.save();
     return {
-      result: { RspCode: '00', Message: 'Confirm Success' },
+      result: { RspCode: '03', Message: 'Payment is processing' },
       payment,
     };
+  }
+
+  private async confirmZalopayPayment(
+    payment: Payment,
+    data: Record<string, any>,
+    raw: Record<string, any>,
+  ): Promise<{ result: IpnResult; payment?: Payment }> {
+    const amountFromZalopay = Number(data.amount || 0);
+    if (amountFromZalopay && amountFromZalopay !== payment.amount) {
+      return { result: { RspCode: '04', Message: 'Invalid amount' }, payment };
+    }
+
+    if (payment.status === 'success') {
+      return {
+        result: { RspCode: '02', Message: 'Order already confirmed' },
+        payment,
+      };
+    }
+
+    payment.responseCode = '1';
+    payment.transactionNo = data.zp_trans_id
+      ? String(data.zp_trans_id)
+      : payment.transactionNo;
+    payment.bankCode = data.channel ? String(data.channel) : payment.bankCode;
+    payment.payDate = data.server_time ? String(data.server_time) : payment.payDate;
+    payment.raw = raw;
+    payment.status = 'success';
+    payment.paidAt = new Date();
+    await payment.save();
+    await this.activatePremium(payment.userId.toString(), payment.cycle);
+    await this.sendInvoiceFor(payment);
+    return { result: { RspCode: '00', Message: 'Confirm Success' }, payment };
   }
 
   async createStripePayment(
@@ -596,7 +627,7 @@ export class PaymentsService {
     const cycleLabel =
       payment.cycle === 'yearly' ? 'Pro · Hằng năm' : 'Pro · Hằng tháng';
     const providerLabel =
-      ({ vnpay: 'VNPay', momo: 'MoMo', stripe: 'Stripe' } as Record<
+      ({ zalopay: 'ZaloPay', stripe: 'Stripe' } as Record<
         string,
         string
       >)[payment.provider] || payment.provider;
