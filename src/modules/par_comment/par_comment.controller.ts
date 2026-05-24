@@ -12,7 +12,7 @@ export class ParCommentController {
 
     @Public()
     @Post(':id')
-    async create(@Param() id: string, @Body() dto: CreateParCommentDto): Promise<ParComment> {
+    async create(@Param('id') id: string, @Body() dto: CreateParCommentDto): Promise<ParComment> {
         return this.parCommentService.create(id, dto)
     }
 

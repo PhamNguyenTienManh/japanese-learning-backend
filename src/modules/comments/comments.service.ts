@@ -6,6 +6,7 @@ import { CreateCommentDto } from './dto/create-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
 import { Max } from 'class-validator';
 import { Profile } from '../profiles/schemas/profiles.schema';
+import { ModerationService } from '../moderation/moderation.service';
 
 @Injectable()
 export class CommentsService {
@@ -14,7 +15,8 @@ export class CommentsService {
         @InjectModel(Comment.name)
         private readonly commentModel: Model<Comment>,
         @InjectModel(Profile.name)
-        private readonly profileModel: Model<Profile>
+        private readonly profileModel: Model<Profile>,
+        private readonly moderationService: ModerationService,
     ) { }
     async create(postId: string, userId: string, dto: CreateCommentDto): Promise<Comment> {
         dto.postId = new Types.ObjectId(postId);
@@ -22,8 +24,13 @@ export class CommentsService {
         const profile = await this.profileModel.findOne({ userId: objectId })
         const profileId = profile?._id as Types.ObjectId;
         dto.profileId = profileId;
-        const comment = new this.commentModel(dto);
-        return comment.save();
+        const comment = await new this.commentModel(dto).save();
+        void this.moderationService
+            .enqueueCreatedContent("comment", String(comment._id))
+            .catch((error) =>
+                console.error("Failed to enqueue comment moderation:", error),
+            );
+        return comment;
     }
 
     async toggleLike(id: string, userId: string): Promise<Comment> {
@@ -64,12 +71,16 @@ export class CommentsService {
 
     async getAllComment(id: string) {
         const objectId = new Types.ObjectId(id)
-        const comment = await this.commentModel.find({ postId: objectId }).select("postId profileId content liked image createdAt").populate("profileId");
+        const comment = await this.commentModel.find({ postId: objectId, isDeleted: { $ne: true } }).select("postId profileId content liked image createdAt").populate("profileId");
         return comment;
     }
 
     async delete(id:string): Promise<Comment | null>{
-        return this.commentModel.findByIdAndDelete(id);
+        return this.commentModel.findByIdAndUpdate(
+            id,
+            { $set: { isDeleted: true, status: 0 } },
+            { new: true },
+        );
     }
 
 }

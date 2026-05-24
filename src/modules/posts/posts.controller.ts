@@ -6,6 +6,7 @@ import { Public } from '../auth/public.decorator';
 import { UpdatePostDto } from './dto/update-post.dto';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { UploadService } from '../upload/upload.service';
+import { Roles } from '../auth/roles.decorator';
 
 @Controller('posts')
 export class PostsController {
@@ -82,6 +83,12 @@ export class PostsController {
     @Public()
     async getOne(@Param("id") id: string): Promise<{data: Posts | null, countComment: number}> {
         return this.postService.getOne(id)
+    }
+
+    @Get("/admin/post/:id")
+    @Roles("admin")
+    async getOneForAdmin(@Param("id") id: string): Promise<{data: Posts | null, countComment: number}> {
+        return this.postService.getOneForAdmin(id)
     }
 
     @Public()

@@ -28,7 +28,7 @@ const JLPT_LEVELS = ["N5", "N4", "N3", "N2", "N1"] as const;
 const AI_COST_FRESH_TTL_MS = 60 * 60 * 1000;
 const AI_COST_STALE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const AI_COST_RETRY_TTL_MS = 15 * 60 * 1000;
-const AI_COST_CACHE_PREFIX = "admin_dashboard_ai_cost";
+const AI_COST_CACHE_PREFIX = "admin_dashboard_ai_cost_v2";
 const AI_COST_LAST_GOOD_KEY = `${AI_COST_CACHE_PREFIX}:last_good`;
 
 interface ProfileLean {
@@ -777,11 +777,15 @@ export class StatisticService {
     const row = Array.isArray(body?.data) ? body.data[0] || {} : {};
     const fetchedAt = new Date();
     const usdToVndRate = this.getUsdToVndRate();
-    const totalCostUsd = this.toNumber(row.totalCost_sum);
+    const totalCostUsd = this.toNumber(
+      row.sum_totalCost ?? row.totalCost_sum,
+    );
 
     return {
       usage30d: {
-        totalTokens: this.toNumber(row.totalTokens_sum),
+        totalTokens: this.toNumber(
+          row.sum_totalTokens ?? row.totalTokens_sum,
+        ),
         totalCostUsd,
         totalCostVnd: Number((totalCostUsd * usdToVndRate).toFixed(2)),
         usdToVndRate,

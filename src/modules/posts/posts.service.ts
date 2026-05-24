@@ -9,6 +9,7 @@ import { User } from '../users/schemas/user.schema';
 import { Profile } from '../profiles/schemas/profiles.schema';
 import { Comment } from '../comments/schemas/comments.schema';
 import { UploadService } from '../upload/upload.service';
+import { ModerationService } from '../moderation/moderation.service';
 
 @Injectable()
 export class PostsService {
@@ -26,6 +27,7 @@ export class PostsService {
         private readonly commentModel: Model<Comment>,
 
         private readonly uploadService: UploadService,
+        private readonly moderationService: ModerationService,
     ) { }
 
     async create(id: string, dto: CreatePostDto): Promise<Posts> {
@@ -38,8 +40,13 @@ export class PostsService {
         dto.profile_id = profile._id as Types.ObjectId;
         dto.category_id = typeof dto.category_id === 'string' ? new Types.ObjectId(dto.category_id) : dto.category_id;
 
-        const post = new this.postModel(dto);
-        return post.save();
+        const post = await new this.postModel(dto).save();
+        void this.moderationService
+            .enqueueCreatedContent("post", String(post._id))
+            .catch((error) =>
+                console.error("Failed to enqueue post moderation:", error),
+            );
+        return post;
     }
 
     async update(id: string, dto: UpdatePostDto): Promise<Posts> {
@@ -116,8 +123,9 @@ export class PostsService {
                 .skip(skip)
                 .limit(limit).populate("category_id")
                 .exec(),
-            this.postModel.countDocuments({status: 1}).exec(),
+            this.postModel.countDocuments({ status: 1 }).exec(),
             this.commentModel.aggregate([
+                { $match: { isDeleted: { $ne: true } } },
                 {
                     $group: {
                         _id: "$postId",
@@ -141,9 +149,21 @@ export class PostsService {
     async getOne(id: string): Promise<{ data: Posts | null, countComment: number }> {
         const objectId = new Types.ObjectId(id);
         const [data, countComment] = await Promise.all([
-            this.postModel.findById(id).populate("profile_id").populate("category_id", "name"),
-            this.commentModel.countDocuments({ postId: objectId })
+            this.postModel.findOne({ _id: objectId, status: 1 }).populate("profile_id").populate("category_id", "name"),
+            this.commentModel.countDocuments({ postId: objectId, isDeleted: { $ne: true } })
         ])
+        return {
+            data, countComment
+        }
+    }
+
+    async getOneForAdmin(id: string): Promise<{ data: Posts | null, countComment: number }> {
+        const objectId = new Types.ObjectId(id);
+        const [data, countComment] = await Promise.all([
+            this.postModel.findById(objectId).populate("profile_id").populate("category_id", "name"),
+            this.commentModel.countDocuments({ postId: objectId, isDeleted: { $ne: true } })
+        ])
+
         return {
             data, countComment
         }
@@ -184,8 +204,8 @@ export class PostsService {
         const skip = (page - 1) * limit;
 
         const filter = query
-            ? { title: { $regex: query, $options: 'i' } }
-            : {};
+            ? { title: { $regex: query, $options: 'i' }, status: 1 }
+            : { status: 1 };
 
         const [items, total, countComment] = await Promise.all([
             this.postModel
@@ -196,6 +216,7 @@ export class PostsService {
 
             this.postModel.countDocuments(filter),
             this.commentModel.aggregate([
+                { $match: { isDeleted: { $ne: true } } },
                 {
                     $group: {
                         _id: "$postId",
@@ -221,8 +242,8 @@ export class PostsService {
         const skip = (page - 1) * limit;
 
         const filter = category
-            ? { category_id: objectId }
-            : {};
+            ? { category_id: objectId, status: 1 }
+            : { status: 1 };
 
         const [items, total, countComment] = await Promise.all([
             this.postModel
@@ -235,6 +256,7 @@ export class PostsService {
 
             this.postModel.countDocuments(filter),
             this.commentModel.aggregate([
+                { $match: { isDeleted: { $ne: true } } },
                 {
                     $group: {
                         _id: "$postId",
