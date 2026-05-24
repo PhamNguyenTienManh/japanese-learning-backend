@@ -244,4 +244,23 @@ export class AuthService {
       throw new BadRequestException("Đăng xuất thất bại");
     }
   }
+
+  async getSession(payload: any) {
+    const user = await this.userModel
+      .findById(payload.sub)
+      .select("premium_expired_date")
+      .exec();
+    const premiumExpiredDate = user?.premium_expired_date ?? null;
+    const isPremium = premiumExpiredDate
+      ? premiumExpiredDate.getTime() > Date.now()
+      : false;
+
+    return {
+      ...payload,
+      isPremium,
+      premiumExpiredDate: premiumExpiredDate
+        ? premiumExpiredDate.toISOString()
+        : null,
+    };
+  }
 }

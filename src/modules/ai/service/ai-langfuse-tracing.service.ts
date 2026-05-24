@@ -21,6 +21,14 @@ type ChatTraceHandle = {
   fail: (error: unknown, output?: unknown) => void;
 };
 
+type ModerationTraceInput = {
+  batchType: "post" | "comment";
+  trigger: "batch_size" | "timeout";
+  itemCount: number;
+  threshold: number;
+  input: unknown;
+};
+
 const NOOP_TRACE_HANDLE: ChatTraceHandle = {
   finish: () => undefined,
   fail: () => undefined,
@@ -92,6 +100,64 @@ export class AiLangfuseTracingService {
                 statusMessage: error?.message || "AI chat run failed",
               });
               this.debugTrace("fail", traceInput, error);
+              throw error;
+            }
+          },
+        );
+      },
+      { asType: "agent" },
+    );
+  }
+
+  async runModerationObservation<T>(
+    traceInput: ModerationTraceInput,
+    work: () => Promise<T>,
+    formatOutput: (result: T) => unknown = (result) => result,
+  ) {
+    if (!this.isConfigured()) {
+      return work();
+    }
+
+    return startActiveObservation(
+      "content-moderation",
+      async (observation) => {
+        observation.update({
+          input: traceInput.input,
+          metadata: {
+            feature: "content-moderation",
+            batchType: traceInput.batchType,
+            trigger: traceInput.trigger,
+            itemCount: traceInput.itemCount,
+            threshold: traceInput.threshold,
+          },
+        });
+        observation.setTraceIO({ input: traceInput.input });
+
+        return propagateAttributes(
+          {
+            traceName: "content-moderation",
+            tags: ["content-moderation", traceInput.batchType, traceInput.trigger],
+            metadata: {
+              feature: "content-moderation",
+              batchType: traceInput.batchType,
+              trigger: traceInput.trigger,
+              itemCount: String(traceInput.itemCount),
+              threshold: String(traceInput.threshold),
+            },
+          },
+          async () => {
+            try {
+              const result = await work();
+              const output = formatOutput(result);
+              observation.update({ output });
+              observation.setTraceIO({ output });
+              return result;
+            } catch (error: any) {
+              observation.update({
+                level: "ERROR",
+                statusMessage:
+                  error?.message || "Content moderation batch failed",
+              });
               throw error;
             }
           },
