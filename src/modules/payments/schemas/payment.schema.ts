@@ -3,7 +3,7 @@ import { Document, Types } from 'mongoose';
 
 export type PaymentStatus = 'pending' | 'success' | 'failed' | 'cancelled';
 export type PaymentCycle = 'monthly' | 'yearly';
-export type PaymentProvider = 'vnpay' | 'momo' | 'stripe';
+export type PaymentProvider = 'zalopay' | 'stripe';
 
 @Schema({ timestamps: true })
 export class Payment extends Document {
@@ -22,7 +22,7 @@ export class Payment extends Document {
   @Prop({ required: true, default: 'Pro' })
   plan: string;
 
-  @Prop({ required: true, enum: ['vnpay', 'momo', 'stripe'], default: 'vnpay' })
+  @Prop({ required: true, enum: ['zalopay', 'stripe'], default: 'zalopay' })
   provider: PaymentProvider;
 
   @Prop({

@@ -45,7 +45,7 @@ export class ProfilesService {
       .populate({
         path: 'userId',
         model: User.name,
-        select: 'email role status provider',
+        select: 'email role status provider premium_date premium_expired_date',
       })
       .exec();
   }

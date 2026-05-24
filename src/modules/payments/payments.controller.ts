@@ -11,41 +11,33 @@ import {
 import type { Request, Response } from 'express';
 import { Public } from '../auth/public.decorator';
 import {
-  CreateMomoPaymentDto,
   CreateStripePaymentDto,
-  CreateVnpayPaymentDto,
+  CreateZalopayPaymentDto,
 } from './dto/create-payment.dto';
 import { PaymentsService } from './payments.service';
-import { getClientIp } from './vnpay.helper';
+import { getClientIp } from './zalopay.helper';
 
 @Controller('payments')
 export class PaymentsController {
   constructor(private readonly paymentsService: PaymentsService) {}
 
-  @Post('vnpay/create')
-  async createVnpay(
-    @Body() dto: CreateVnpayPaymentDto,
+  @Post('zalopay/create')
+  async createZalopay(
+    @Body() dto: CreateZalopayPaymentDto,
     @Req() req: Request & { user: { sub: string } },
   ) {
     const userId = req.user.sub;
     const ipAddr = getClientIp(req);
-    return this.paymentsService.createVnpayPayment(
-      userId,
-      dto.cycle,
-      ipAddr,
-      dto.bankCode,
-    );
+    return this.paymentsService.createZalopayPayment(userId, dto.cycle, ipAddr);
   }
 
-  /**
-   * Browser redirect endpoint. We verify, activate premium if needed, then
-   * redirect the user to the frontend success/failure page so the SPA can
-   * read the result from query params.
-   */
   @Public()
-  @Get('vnpay/return')
-  async vnpayReturn(@Query() query: Record<string, any>, @Res() res: Response) {
-    const { result, payment } = await this.paymentsService.processVnpayCallback(
+  @Get('zalopay/return')
+  async zalopayReturn(
+    @Query() query: Record<string, any>,
+    @Res() res: Response,
+  ) {
+    const { result, payment } = await this.paymentsService.processZalopayReturn(
       query,
     );
 
@@ -58,10 +50,10 @@ export class PaymentsController {
           : 'failed';
 
     const params = new URLSearchParams({
-      provider: 'vnpay',
+      provider: 'zalopay',
       status,
-      orderId: String(query.vnp_TxnRef || ''),
-      code: String(query.vnp_ResponseCode || ''),
+      orderId: payment?.orderId || String(query.apptransid || ''),
+      code: String(query.status || result.RspCode || ''),
     });
     if (payment) {
       params.set('amount', String(payment.amount));
@@ -71,70 +63,26 @@ export class PaymentsController {
     return res.redirect(`${frontendUrl}/payment/success?${params.toString()}`);
   }
 
-  /**
-   * Server-to-server IPN. Must respond with the exact JSON shape VNPay expects
-   * (no wrapping by the global TransformInterceptor), so we use @Res directly.
-   */
   @Public()
-  @Get('vnpay/ipn')
-  async vnpayIpn(@Query() query: Record<string, any>, @Res() res: Response) {
-    const { result } = await this.paymentsService.processVnpayCallback(query);
-    return res.status(200).json(result);
-  }
-
-  @Post('momo/create')
-  async createMomo(
-    @Body() dto: CreateMomoPaymentDto,
-    @Req() req: Request & { user: { sub: string } },
+  @Post('zalopay/callback')
+  async zalopayCallback(
+    @Body() body: Record<string, any>,
+    @Res() res: Response,
   ) {
-    const userId = req.user.sub;
-    const ipAddr = getClientIp(req);
-    return this.paymentsService.createMomoPayment(userId, dto.cycle, ipAddr);
-  }
-
-  /**
-   * Browser redirect endpoint. MoMo appends query params on the GET back
-   * to our redirectUrl; we verify, activate premium if needed, and bounce
-   * the user to the SPA success page.
-   */
-  @Public()
-  @Get('momo/return')
-  async momoReturn(@Query() query: Record<string, any>, @Res() res: Response) {
-    const { result, payment } = await this.paymentsService.processMomoCallback(
-      query,
-    );
-
-    const frontendUrl = process.env.FRONTEND_URL || '';
-    const status =
-      result.RspCode === '00' && payment?.status === 'success'
-        ? 'success'
+    const { result } = await this.paymentsService.processZalopayCallback(body);
+    const returnCode =
+      result.RspCode === '00'
+        ? 1
         : result.RspCode === '02'
-          ? 'success'
-          : 'failed';
+          ? 2
+          : result.RspCode === '97'
+            ? -1
+            : 0;
 
-    const params = new URLSearchParams({
-      provider: 'momo',
-      status,
-      orderId: String(query.orderId || ''),
-      code: String(query.resultCode || ''),
+    return res.status(200).json({
+      return_code: returnCode,
+      return_message: result.Message,
     });
-    if (payment) {
-      params.set('amount', String(payment.amount));
-      params.set('cycle', payment.cycle);
-    }
-
-    return res.redirect(`${frontendUrl}/payment/success?${params.toString()}`);
-  }
-
-  /**
-   * MoMo IPN — server-to-server JSON POST. Spec expects HTTP 204 No Content
-   * when we have processed (or knowingly ignore) the notification.
-   */
-  @Public()
-  @Post('momo/ipn')
-  async momoIpn(@Body() body: Record<string, any>, @Res() res: Response) {
-    await this.paymentsService.processMomoCallback(body);
-    return res.status(204).send();
   }
 
   @Post('stripe/create')

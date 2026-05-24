@@ -71,6 +71,31 @@ export class AuthService {
     return { access_token: token };
   }
 
+  async getCurrentSession(payload: any) {
+    const user = await this.userModel
+      .findById(payload?.sub)
+      .select('email role premium_date premium_expired_date')
+      .lean();
+
+    if (!user) {
+      return payload;
+    }
+
+    const now = new Date();
+    const isPremium = !!(
+      user.premium_expired_date && user.premium_expired_date > now
+    );
+
+    return {
+      ...payload,
+      email: user.email,
+      role: user.role,
+      isPremium,
+      premium_date: user.premium_date || null,
+      premium_expired_date: user.premium_expired_date || null,
+    };
+  }
+
   async findByEmail(mail: string) {
     return this.userModel.findOne({ email: mail });
   }
