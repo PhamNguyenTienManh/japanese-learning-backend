@@ -1,17 +1,6 @@
-import { IsEnum, IsOptional, IsString } from 'class-validator';
+import { IsEnum } from 'class-validator';
 
-export class CreateVnpayPaymentDto {
-  @IsEnum(['monthly', 'yearly'], {
-    message: 'cycle must be either "monthly" or "yearly"',
-  })
-  cycle: 'monthly' | 'yearly';
-
-  @IsOptional()
-  @IsString()
-  bankCode?: string;
-}
-
-export class CreateMomoPaymentDto {
+export class CreateZalopayPaymentDto {
   @IsEnum(['monthly', 'yearly'], {
     message: 'cycle must be either "monthly" or "yearly"',
   })
