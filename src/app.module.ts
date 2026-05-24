@@ -50,6 +50,7 @@ import { PdfModule } from "./modules/pdf/pdf.module";
 import { KantanModule } from "./modules/kantan/kantan.module";
 import { PaymentsModule } from "./modules/payments/payments.module";
 import { ModerationModule } from "./modules/moderation/moderation.module";
+import { ConversationModule } from "./modules/conversation/conversation.module";
 
 
 @Module({
@@ -99,6 +100,7 @@ import { ModerationModule } from "./modules/moderation/moderation.module";
     KantanModule,
     PaymentsModule,
     ModerationModule,
+    ConversationModule,
 
     CacheModule.registerAsync({
       useFactory: async () => {
