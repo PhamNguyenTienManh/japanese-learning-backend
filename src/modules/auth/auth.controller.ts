@@ -64,7 +64,7 @@ export class AuthController {
 
   @Get('me')
   async me(@Req() req) {
-    return req.user;
+    return this.authService.getCurrentSession(req.user);
   }
 
   @Get('google')

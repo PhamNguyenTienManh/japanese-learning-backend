@@ -113,6 +113,21 @@ export class PaymentsService {
     return `${stamp}${rand}`;
   }
 
+  private async assertCanCreatePremiumPayment(userId: string): Promise<User> {
+    const user = await this.userModel.findById(userId);
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+
+    if (user.premium_expired_date && user.premium_expired_date > new Date()) {
+      throw new BadRequestException(
+        'Tài khoản của bạn đã có gói Premium đang hoạt động.',
+      );
+    }
+
+    return user;
+  }
+
   async createZalopayPayment(
     userId: string,
     cycle: PaymentCycle,
@@ -122,6 +137,7 @@ export class PaymentsService {
     if (!amount) {
       throw new BadRequestException('Invalid cycle');
     }
+    await this.assertCanCreatePremiumPayment(userId);
 
     const {
       appId,
@@ -387,11 +403,7 @@ export class PaymentsService {
     const { returnUrl, currency } = this.getStripeConfig();
     const stripe = this.getStripeClient();
     const orderId = this.genOrderId();
-
-    const user = await this.userModel.findById(userId);
-    if (!user) {
-      throw new BadRequestException('User not found');
-    }
+    const user = await this.assertCanCreatePremiumPayment(userId);
 
     await this.paymentModel.create({
       userId: new Types.ObjectId(userId),
