@@ -157,6 +157,42 @@ export class PostsService {
         }
     }
 
+    async getOneAccessible(
+        id: string,
+        userId: string,
+        role?: string,
+    ): Promise<{ data: Posts | null, countComment: number }> {
+        const objectId = new Types.ObjectId(id);
+        const post = await this.postModel
+            .findById(objectId)
+            .populate("profile_id")
+            .populate("category_id", "name");
+
+        if (!post) {
+            return { data: null, countComment: 0 };
+        }
+
+        const postData: any = post;
+        const ownerUserId = postData.profile_id?.userId
+            ? String(postData.profile_id.userId)
+            : "";
+        const canViewHidden =
+            Number(postData.status) === 1 ||
+            role === "admin" ||
+            (userId && ownerUserId === String(userId));
+
+        if (!canViewHidden) {
+            return { data: null, countComment: 0 };
+        }
+
+        const countComment = await this.commentModel.countDocuments({
+            postId: objectId,
+            isDeleted: { $ne: true },
+        });
+
+        return { data: post, countComment };
+    }
+
     async getOneForAdmin(id: string): Promise<{ data: Posts | null, countComment: number }> {
         const objectId = new Types.ObjectId(id);
         const [data, countComment] = await Promise.all([

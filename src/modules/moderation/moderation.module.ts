@@ -18,6 +18,7 @@ import {
 } from "../par_comment/schemas/par_comment.schema";
 import { Profile, ProfileSchema } from "../profiles/schemas/profiles.schema";
 import { AiModule } from "../ai/ai.module";
+import { NotificationsModule } from "../notifications/notifications.module";
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { AiModule } from "../ai/ai.module";
       { name: Profile.name, schema: ProfileSchema },
     ]),
     AiModule,
+    NotificationsModule,
   ],
   controllers: [ModerationController],
   providers: [ModerationService],

@@ -13,6 +13,7 @@ import { Profile, ProfileSchema } from '../profiles/schemas/profiles.schema';
     ])
   ],
   providers: [NotificationsService],
-  controllers: [NotificationController]
+  controllers: [NotificationController],
+  exports: [NotificationsService],
 })
 export class NotificationsModule {}
