@@ -2,7 +2,7 @@ import { Prop, Schema, SchemaFactory } from "@nestjs/mongoose";
 import { Document, Types } from "mongoose";
 
 export type ModerationTargetType = "post" | "comment" | "reply_comment";
-export type ModerationSource = "rulebase" | "ai";
+export type ModerationSource = "rulebase" | "ai" | "user_report";
 export type ModerationStatus =
   | "pending"
   | "auto_deleted"
@@ -17,6 +17,16 @@ export type ModerationCategory =
   | "language_misinformation"
   | "nsfw"
   | "manipulation";
+
+export type UserReport = {
+  reporterUserId: Types.ObjectId;
+  reporterProfileId: Types.ObjectId;
+  reporterName: string;
+  category: ModerationCategory;
+  subcategory: string;
+  description?: string;
+  createdAt: Date;
+};
 
 @Schema({ timestamps: true, collection: "moderation_cases" })
 export class ModerationCase extends Document {
@@ -41,7 +51,7 @@ export class ModerationCase extends Document {
   @Prop({ type: String, required: true })
   contentSnapshot: string;
 
-  @Prop({ required: true, enum: ["rulebase", "ai"] })
+  @Prop({ required: true, enum: ["rulebase", "ai", "user_report"] })
   source: ModerationSource;
 
   @Prop({
@@ -75,6 +85,36 @@ export class ModerationCase extends Document {
   @Prop({ type: [String], default: [] })
   matchedTerms: string[];
 
+  @Prop({ type: Number, default: 0, min: 0 })
+  reportCount: number;
+
+  @Prop({
+    type: [
+      {
+        reporterUserId: { type: Types.ObjectId, required: true },
+        reporterProfileId: { type: Types.ObjectId, required: true },
+        reporterName: { type: String, default: "" },
+        category: {
+          type: String,
+          required: true,
+          enum: [
+            "spam_advertising",
+            "abusive_language",
+            "off_topic",
+            "language_misinformation",
+            "nsfw",
+            "manipulation",
+          ],
+        },
+        subcategory: { type: String, required: true },
+        description: { type: String, default: "" },
+        createdAt: { type: Date, default: Date.now },
+      },
+    ],
+    default: [],
+  })
+  userReports: UserReport[];
+
   @Prop({ type: Object, default: null })
   aiRawOutput?: Record<string, unknown> | null;
 
@@ -89,5 +129,6 @@ export const ModerationCaseSchema =
   SchemaFactory.createForClass(ModerationCase);
 
 ModerationCaseSchema.index({ status: 1, createdAt: -1 });
+ModerationCaseSchema.index({ source: 1, status: 1, createdAt: -1 });
 ModerationCaseSchema.index({ targetType: 1, targetId: 1, status: 1 });
 ModerationCaseSchema.index({ parentPostId: 1 });

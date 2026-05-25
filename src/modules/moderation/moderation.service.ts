@@ -1,7 +1,10 @@
 import {
+  BadRequestException,
+  ForbiddenException,
   Inject,
   Injectable,
   Logger,
+  NotFoundException,
   OnModuleDestroy,
   OnModuleInit,
 } from "@nestjs/common";
@@ -14,6 +17,8 @@ import { Comment } from "../comments/schemas/comments.schema";
 import { ParComment } from "../par_comment/schemas/par_comment.schema";
 import { Posts } from "../posts/schemas/posts.schema";
 import { Profile } from "../profiles/schemas/profiles.schema";
+import { NotificationsService } from "../notifications/notifications.service";
+import { CreatePostReportDto } from "./dto/create-post-report.dto";
 import { UpdateModerationSettingDto } from "./dto/update-moderation-setting.dto";
 import { findToxicTerms } from "./rules/toxic-terms";
 import {
@@ -84,6 +89,7 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
     private readonly redisClient: Redis,
     private readonly googleGenAIClient: GoogleGenAIClient,
     private readonly aiLangfuseTracing: AiLangfuseTracingService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async onModuleInit() {
@@ -137,16 +143,23 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
   async listCases({
     status,
     targetType,
+    source,
     page = 1,
     limit = 20,
   }: {
     status?: string;
     targetType?: string;
+    source?: string;
     page?: number;
     limit?: number;
   }) {
     const filter: Record<string, unknown> = {};
     if (targetType) filter.targetType = targetType;
+    if (source === "automated") {
+      filter.source = { $in: ["rulebase", "ai"] };
+    } else if (source) {
+      filter.source = source;
+    }
     if (status === "handled") {
       filter.status = { $in: ["approved_deleted", "dismissed", "restored"] };
     } else if (status) {
@@ -167,11 +180,42 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
     ]);
 
     return {
-      data: items,
+      data: items.map((item) => this.normalizeListedCase(item)),
       total,
       page: safePage,
       limit: safeLimit,
       totalPage: Math.ceil(total / safeLimit),
+    };
+  }
+
+  async getCaseCounts() {
+    const automatedSourceFilter = { $in: ["rulebase", "ai"] };
+    const [
+      automatedPending,
+      automatedAutoDeleted,
+      userReportPostsPending,
+    ] = await Promise.all([
+      this.moderationCaseModel.countDocuments({
+        source: automatedSourceFilter,
+        status: "pending",
+      }),
+      this.moderationCaseModel.countDocuments({
+        source: automatedSourceFilter,
+        status: "auto_deleted",
+      }),
+      this.moderationCaseModel.countDocuments({
+        source: "user_report",
+        targetType: "post",
+        status: "pending",
+      }),
+    ]);
+
+    return {
+      automatedPending,
+      automatedAutoDeleted,
+      userReportPostsPending,
+      actionableTotal:
+        automatedPending + automatedAutoDeleted + userReportPostsPending,
     };
   }
 
@@ -183,7 +227,110 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
     item.status = "approved_deleted";
     item.actionAt = new Date();
     item.actionBy = adminId ? new Types.ObjectId(adminId) : null;
-    return item.save();
+    const saved = await item.save();
+    await this.notifyReportApprovedDeleted(saved);
+    return saved;
+  }
+
+  async reportPost(postId: string, userId: string, dto: CreatePostReportDto) {
+    if (!Types.ObjectId.isValid(postId)) {
+      throw new BadRequestException("Post id không hợp lệ.");
+    }
+    if (!Types.ObjectId.isValid(userId)) {
+      throw new BadRequestException("User id không hợp lệ.");
+    }
+    if (!dto.subcategory?.trim()) {
+      throw new BadRequestException("Vui lòng chọn mục vi phạm cụ thể.");
+    }
+
+    const [post, reporterProfile] = await Promise.all([
+      this.postModel
+        .findOne({ _id: new Types.ObjectId(postId), status: 1 })
+        .populate("profile_id", "name userId")
+        .lean<any>(),
+      this.profileModel.findOne({ userId: new Types.ObjectId(userId) }).lean<any>(),
+    ]);
+
+    if (!post) {
+      throw new NotFoundException("Bài viết không tồn tại hoặc đã bị ẩn.");
+    }
+    if (!reporterProfile) {
+      throw new NotFoundException("Không tìm thấy hồ sơ người báo cáo.");
+    }
+
+    const authorUserId = post.profile_id?.userId
+      ? String(post.profile_id.userId)
+      : "";
+    if (authorUserId && authorUserId === String(userId)) {
+      throw new ForbiddenException("Bạn không thể báo cáo bài viết của chính mình.");
+    }
+
+    const targetObjectId = new Types.ObjectId(postId);
+    const existing = await this.moderationCaseModel.findOne({
+      source: "user_report",
+      targetType: "post",
+      targetId: targetObjectId,
+      status: "pending",
+    });
+
+    const alreadyReported = existing?.userReports?.some(
+      (report) => String(report.reporterUserId) === String(userId),
+    );
+    if (existing && alreadyReported) {
+      return {
+        alreadyReported: true,
+        message: "Báo cáo bài viết đã được ghi nhận trước đó.",
+        case: existing,
+      };
+    }
+
+    const report = {
+      reporterUserId: new Types.ObjectId(userId),
+      reporterProfileId: reporterProfile._id,
+      reporterName: reporterProfile.name || "",
+      category: dto.category,
+      subcategory: dto.subcategory.trim(),
+      description: dto.description?.trim() || "",
+      createdAt: new Date(),
+    };
+
+    if (existing) {
+      existing.userReports = [...(existing.userReports || []), report];
+      existing.reportCount = existing.userReports.length;
+      existing.category = existing.category || dto.category;
+      existing.reason = this.buildUserReportReason(existing.userReports);
+      return {
+        alreadyReported: false,
+        message: "Báo cáo bài viết thành công.",
+        case: await existing.save(),
+      };
+    }
+
+    const created = await this.moderationCaseModel.create({
+      targetType: "post",
+      targetId: targetObjectId,
+      parentPostId: targetObjectId,
+      authorId: post.profile_id?._id || null,
+      authorName: post.profile_id?.name || "",
+      title: post.title || "",
+      contentSnapshot: post.content || "",
+      source: "user_report",
+      category: dto.category,
+      confidence: null,
+      status: "pending",
+      reason: this.buildUserReportReason([report]),
+      matchedTerms: [],
+      reportCount: 1,
+      userReports: [report],
+      aiRawOutput: null,
+      actionAt: null,
+    });
+
+    return {
+      alreadyReported: false,
+      message: "Báo cáo bài viết thành công.",
+      case: created,
+    };
   }
 
   async dismissCase(caseId: string, adminId?: string) {
@@ -193,7 +340,9 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
     item.status = "dismissed";
     item.actionAt = new Date();
     item.actionBy = adminId ? new Types.ObjectId(adminId) : null;
-    return item.save();
+    const saved = await item.save();
+    await this.notifyReportDismissed(saved);
+    return saved;
   }
 
   async restoreCase(caseId: string, adminId?: string) {
@@ -397,6 +546,7 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
     const existing = await this.moderationCaseModel.findOne({
       targetType: target.targetType,
       targetId: new Types.ObjectId(target.targetId),
+      source: { $in: ["rulebase", "ai"] },
       status: { $in: ACTIVE_CASE_STATUSES },
     });
     if (existing) return existing;
@@ -415,6 +565,8 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
       status: input.status,
       reason: input.reason,
       matchedTerms: input.matchedTerms,
+      reportCount: 0,
+      userReports: [],
       aiRawOutput: input.aiRawOutput || null,
       actionAt: input.status === "auto_deleted" ? new Date() : null,
     });
@@ -552,7 +704,9 @@ Quan trọng: phân biệt ví dụ học tập hoặc giải thích từ lóng/
 Với targetType="comment", nếu có postContext thì dùng tiêu đề/nội dung bài viết cha để đánh giá comment có off-topic hay không. Với reply_comment không cần postContext.
 
 Chỉ trả JSON hợp lệ, không markdown, theo schema:
-{"results":[{"id":"...","targetType":"post|comment|reply_comment","isViolation":true|false,"category":"spam_advertising|abusive_language|off_topic|language_misinformation|nsfw|manipulation|null","confidence":0.0,"reason":"ngắn gọn bằng tiếng Việt"}]}
+{"results":[{"id":"...","targetType":"post|comment|reply_comment","isViolation":true|false,"category":"spam_advertising|abusive_language|off_topic|language_misinformation|nsfw|manipulation|null","confidence":0.75,"reason":"ngắn gọn bằng tiếng Việt"}]}
+
+Nếu isViolation=true, confidence là độ chắc chắn nội dung vi phạm trong khoảng 0-1. Confidence phải phản ánh mức chắc chắn thật của bạn, không copy số mẫu trong schema; ví dụ nghi ngờ rất thấp có thể là 0.15, trung bình 0.5-0.79, rất chắc chắn từ 0.8 trở lên. Nếu isViolation=false, category phải là null.
 
 Nội dung cần duyệt:
 ${JSON.stringify(payload)}
@@ -618,8 +772,126 @@ ${JSON.stringify(payload)}
     return this.toBoundedNumber(value, 0, 0, 1);
   }
 
+  private normalizeListedCase<
+    T extends {
+      source?: string;
+      confidence?: unknown;
+      aiRawOutput?: Record<string, unknown> | null;
+    },
+  >(item: T) {
+    if (item.source !== "ai") return item;
+    const sourceConfidence =
+      item.aiRawOutput &&
+      Object.prototype.hasOwnProperty.call(item.aiRawOutput, "confidence")
+        ? item.aiRawOutput.confidence
+        : item.confidence;
+
+    return {
+      ...item,
+      confidence: this.clampConfidence(sourceConfidence),
+    };
+  }
+
   private truncateForPrompt(value: string, maxLength: number) {
     if (!value || value.length <= maxLength) return value;
     return `${value.slice(0, maxLength)}...`;
+  }
+
+  private async notifyReportApprovedDeleted(item: ModerationCase) {
+    if (item.targetType !== "post") return;
+
+    try {
+      const context = await this.loadPostNotificationContext(item);
+      if (!context) return;
+
+      const ownerUserId = context.ownerUserId;
+      if (ownerUserId) {
+        await this.notificationsService.createSystemNotification({
+          userId: ownerUserId,
+          targetId: context.postId,
+          title: "Bài viết vi phạm",
+          message:
+            "Bài viết của bạn đã bị xóa vì vi phạm tiêu chuẩn cộng đồng.",
+        });
+      }
+
+      const reporterIds = this.getUniqueReporterUserIds(item, ownerUserId);
+      await Promise.all(
+        reporterIds.map((reporterId) =>
+          this.notificationsService.createSystemNotification({
+            userId: reporterId,
+            targetId: context.postId,
+            title: "Kết quả báo cáo",
+            message:
+              "Cảm ơn bạn đã báo cáo. Admin đã xem xét và xóa bài viết vi phạm.",
+          }),
+        ),
+      );
+    } catch (error: any) {
+      this.logger.warn(
+        `Failed to notify report approved deletion: ${error?.message || error}`,
+      );
+    }
+  }
+
+  private async notifyReportDismissed(item: ModerationCase) {
+    if (item.targetType !== "post") return;
+
+    try {
+      const context = await this.loadPostNotificationContext(item);
+      if (!context) return;
+
+      const reporterIds = this.getUniqueReporterUserIds(item, context.ownerUserId);
+      await Promise.all(
+        reporterIds.map((reporterId) =>
+          this.notificationsService.createSystemNotification({
+            userId: reporterId,
+            targetId: context.postId,
+            title: "Kết quả báo cáo",
+            message:
+              "Cảm ơn bạn đã báo cáo. Sau khi xem xét, admin nhận thấy bài viết chưa đủ căn cứ để xóa.",
+          }),
+        ),
+      );
+    } catch (error: any) {
+      this.logger.warn(
+        `Failed to notify dismissed report: ${error?.message || error}`,
+      );
+    }
+  }
+
+  private async loadPostNotificationContext(item: ModerationCase) {
+    const postId = String(item.targetId);
+    if (!Types.ObjectId.isValid(postId)) return null;
+
+    const post = await this.postModel
+      .findById(new Types.ObjectId(postId))
+      .populate("profile_id", "userId")
+      .lean<any>();
+    if (!post) return null;
+
+    return {
+      postId,
+      ownerUserId: post.profile_id?.userId ? String(post.profile_id.userId) : "",
+    };
+  }
+
+  private getUniqueReporterUserIds(item: ModerationCase, excludedUserId?: string) {
+    const ids = new Set<string>();
+    for (const report of item.userReports || []) {
+      const reporterId = report.reporterUserId ? String(report.reporterUserId) : "";
+      if (!reporterId || reporterId === excludedUserId) continue;
+      ids.add(reporterId);
+    }
+    return [...ids];
+  }
+
+  private buildUserReportReason(
+    reports: Array<{ subcategory?: string; description?: string }>,
+  ) {
+    const latest = reports[reports.length - 1];
+    const detail = latest?.subcategory ? ` Mục gần nhất: ${latest.subcategory}.` : "";
+    const description = latest?.description ? ` Ghi chú: ${latest.description}` : "";
+    return `${reports.length} lượt báo cáo từ người dùng.${detail}${description}`.trim();
   }
 }

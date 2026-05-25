@@ -79,16 +79,24 @@ export class PostsController {
         return this.postService.getAll(pageNumber, limitNumber);
     }
 
-    @Get("/post/:id")
-    @Public()
-    async getOne(@Param("id") id: string): Promise<{data: Posts | null, countComment: number}> {
-        return this.postService.getOne(id)
+    @Get("/post/:id/accessible")
+    async getOneAccessible(
+        @Param("id") id: string,
+        @Req() req: any,
+    ): Promise<{data: Posts | null, countComment: number}> {
+        return this.postService.getOneAccessible(id, req.user?.sub, req.user?.role)
     }
 
     @Get("/admin/post/:id")
     @Roles("admin")
     async getOneForAdmin(@Param("id") id: string): Promise<{data: Posts | null, countComment: number}> {
         return this.postService.getOneForAdmin(id)
+    }
+
+    @Get("/post/:id")
+    @Public()
+    async getOne(@Param("id") id: string): Promise<{data: Posts | null, countComment: number}> {
+        return this.postService.getOne(id)
     }
 
     @Public()

@@ -7,8 +7,8 @@ export class Notification extends Document {
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
   userId: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'User', required: true })
-  fromProfileId: Types.ObjectId;
+  @Prop({ type: Types.ObjectId, ref: 'Profile', default: null })
+  fromProfileId?: Types.ObjectId | null;
 
   // // Loại thông báo
   // @Prop({
@@ -18,8 +18,8 @@ export class Notification extends Document {
   // })
   // type: string;
 
-  @Prop({ type: Types.ObjectId, ref: Posts.name })
-  targetId: Types.ObjectId;
+  @Prop({ type: Types.ObjectId, ref: Posts.name, default: null })
+  targetId?: Types.ObjectId | null;
 
   @Prop({ type: String, required: true })
   title: string;

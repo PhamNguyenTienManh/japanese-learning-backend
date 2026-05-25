@@ -4,8 +4,6 @@ import { Model, Types } from 'mongoose';
 import { CreateNotificationDto } from './dto/CreateNotificationDto';
 import { Notification } from './schemas/notifications.schema';
 import { Profile } from '../profiles/schemas/profiles.schema';
-import { convertEventStreamToIterableReadableDataStream } from '@langchain/core/utils/event_source_parse';
-import { log } from 'node:console';
 
 @Injectable()
 export class NotificationsService {
@@ -18,15 +16,17 @@ export class NotificationsService {
 
     async pushNotification(fromUserId: string, dto: CreateNotificationDto): Promise<any> {
         const userId = new Types.ObjectId(dto.userId);
-        const fromUserIdObject = fromUserId? new Types.ObjectId(fromUserId): "Admin"
-        const targetObjectId = new Types.ObjectId(dto.targetId);
+        const fromUserIdObject = fromUserId ? new Types.ObjectId(fromUserId) : null;
+        const targetObjectId = dto.targetId ? new Types.ObjectId(dto.targetId) : null;
 
-        const profile = await this.profileModel.findOne({ userId: fromUserIdObject })
+        const profile = fromUserIdObject
+            ? await this.profileModel.findOne({ userId: fromUserIdObject })
+            : null;
         const ProfileId = profile?._id as Types.ObjectId;
 
         const notification = await this.notificationModel.create({
             userId: userId,
-            fromProfileId: ProfileId?ProfileId: fromUserIdObject,
+            fromProfileId: ProfileId || null,
             targetId: targetObjectId,
             title: dto.title,
             message: dto.message,
@@ -37,6 +37,17 @@ export class NotificationsService {
             message: 'Notification pushed successfully',
             data: notification,
         };
+    }
+
+    async createSystemNotification(dto: CreateNotificationDto): Promise<Notification> {
+        return this.notificationModel.create({
+            userId: new Types.ObjectId(dto.userId),
+            fromProfileId: null,
+            targetId: dto.targetId ? new Types.ObjectId(dto.targetId) : null,
+            title: dto.title,
+            message: dto.message,
+            isRead: false,
+        });
     }
 
     async getNotification(userId: string): Promise<Notification[]> {
