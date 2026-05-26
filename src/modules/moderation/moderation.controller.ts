@@ -32,6 +32,12 @@ export class ModerationController {
     return this.moderationService.getCaseCounts();
   }
 
+  @Get("metrics/post-ai")
+  @Roles("admin")
+  getPostAiMetrics(@Query("range") range = "30d") {
+    return this.moderationService.getPostAiMetrics(range);
+  }
+
   @Post("reports/posts/:postId")
   reportPost(
     @Param("postId") postId: string,

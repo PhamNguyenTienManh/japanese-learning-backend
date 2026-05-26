@@ -7,6 +7,10 @@ import {
   ModerationCaseSchema,
 } from "./schemas/moderation-case.schema";
 import {
+  ModerationAiEvaluation,
+  ModerationAiEvaluationSchema,
+} from "./schemas/moderation-ai-evaluation.schema";
+import {
   ModerationSetting,
   ModerationSettingSchema,
 } from "./schemas/moderation-setting.schema";
@@ -24,6 +28,10 @@ import { NotificationsModule } from "../notifications/notifications.module";
   imports: [
     MongooseModule.forFeature([
       { name: ModerationCase.name, schema: ModerationCaseSchema },
+      {
+        name: ModerationAiEvaluation.name,
+        schema: ModerationAiEvaluationSchema,
+      },
       { name: ModerationSetting.name, schema: ModerationSettingSchema },
       { name: Posts.name, schema: PostSchema },
       { name: Comment.name, schema: CommentSchema },

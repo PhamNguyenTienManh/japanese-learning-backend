@@ -10,6 +10,10 @@ export type ModerationStatus =
   | "dismissed"
   | "restored";
 
+export type ModerationReviewDecision =
+  | "confirmed_violation"
+  | "rejected_violation";
+
 export type ModerationCategory =
   | "spam_advertising"
   | "abusive_language"
@@ -79,6 +83,20 @@ export class ModerationCase extends Document {
   })
   status: ModerationStatus;
 
+  @Prop({
+    type: String,
+    default: null,
+    enum: ["pending", "auto_deleted", null],
+  })
+  initialStatus?: Extract<ModerationStatus, "pending" | "auto_deleted"> | null;
+
+  @Prop({
+    type: String,
+    default: null,
+    enum: ["confirmed_violation", "rejected_violation", null],
+  })
+  reviewDecision?: ModerationReviewDecision | null;
+
   @Prop({ type: String, default: "" })
   reason: string;
 
@@ -132,3 +150,4 @@ ModerationCaseSchema.index({ status: 1, createdAt: -1 });
 ModerationCaseSchema.index({ source: 1, status: 1, createdAt: -1 });
 ModerationCaseSchema.index({ targetType: 1, targetId: 1, status: 1 });
 ModerationCaseSchema.index({ parentPostId: 1 });
+ModerationCaseSchema.index({ source: 1, targetType: 1, reviewDecision: 1 });
