@@ -22,8 +22,13 @@ import { CreatePostReportDto } from "./dto/create-post-report.dto";
 import { UpdateModerationSettingDto } from "./dto/update-moderation-setting.dto";
 import { findToxicTerms } from "./rules/toxic-terms";
 import {
+  ModerationAiDecisionStatus,
+  ModerationAiEvaluation,
+} from "./schemas/moderation-ai-evaluation.schema";
+import {
   ModerationCase,
   ModerationCategory,
+  ModerationReviewDecision,
   ModerationStatus,
   ModerationTargetType,
 } from "./schemas/moderation-case.schema";
@@ -66,6 +71,13 @@ const DEFAULT_SETTINGS = {
 
 const QUEUE_PREFIX = "moderation:queue";
 const ACTIVE_CASE_STATUSES: ModerationStatus[] = ["pending", "auto_deleted"];
+const METRIC_RANGE_DAYS: Record<string, number | null> = {
+  "30d": 30,
+  "90d": 90,
+  "180d": 180,
+  "365d": 365,
+  all: null,
+};
 
 @Injectable()
 export class ModerationService implements OnModuleInit, OnModuleDestroy {
@@ -75,6 +87,8 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
   constructor(
     @InjectModel(ModerationCase.name)
     private readonly moderationCaseModel: Model<ModerationCase>,
+    @InjectModel(ModerationAiEvaluation.name)
+    private readonly moderationAiEvaluationModel: Model<ModerationAiEvaluation>,
     @InjectModel(ModerationSetting.name)
     private readonly moderationSettingModel: Model<ModerationSetting>,
     @InjectModel(Posts.name)
@@ -219,15 +233,68 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  async getPostAiMetrics(range = "30d") {
+    if (!Object.prototype.hasOwnProperty.call(METRIC_RANGE_DAYS, range)) {
+      throw new BadRequestException("Khoảng thời gian metric không hợp lệ.");
+    }
+
+    const days = METRIC_RANGE_DAYS[range];
+    const filter: Record<string, unknown> = {};
+    if (days) {
+      const from = new Date();
+      from.setUTCDate(from.getUTCDate() - days);
+      filter.createdAt = { $gte: from };
+    }
+
+    const evaluations = await this.moderationAiEvaluationModel
+      .find(filter)
+      .select("isViolation confidence decisionStatus reviewDecision createdAt")
+      .lean();
+
+    const counts = evaluations.reduce(
+      (acc, item) => {
+        const label = this.getEvaluationLabel(item);
+        if (label === "tp") acc.tp += 1;
+        if (label === "fp") acc.fp += 1;
+        if (label === "fn") acc.fn += 1;
+        if (label === "excluded") acc.excluded += 1;
+        return acc;
+      },
+      { tp: 0, fp: 0, fn: 0, excluded: 0 },
+    );
+
+    return {
+      range,
+      counts: {
+        ...counts,
+        evaluated: counts.tp + counts.fp + counts.fn,
+      },
+      scores: this.calculateScores(counts.tp, counts.fp, counts.fn),
+      curve: this.getPrecisionRecallThresholds(evaluations).map((threshold) =>
+        this.calculatePrecisionRecallPoint(evaluations, threshold),
+      ),
+    };
+  }
+
   async deleteCase(caseId: string, adminId?: string) {
     const item = await this.moderationCaseModel.findById(caseId);
     if (!item) return null;
 
     await this.softDeleteTarget(item.targetType, item.targetId);
+    const actionAt = new Date();
     item.status = "approved_deleted";
-    item.actionAt = new Date();
+    item.actionAt = actionAt;
     item.actionBy = adminId ? new Types.ObjectId(adminId) : null;
+    if (this.isAiPostCase(item)) {
+      item.reviewDecision = "confirmed_violation";
+    }
     const saved = await item.save();
+    if (this.isAiPostCase(saved)) {
+      await this.syncAiEvaluationReview(saved, "confirmed_violation", actionAt);
+    }
+    if (saved.source === "user_report" && saved.targetType === "post") {
+      await this.markApprovedPostFalseNegative(saved, actionAt);
+    }
     await this.notifyReportApprovedDeleted(saved);
     return saved;
   }
@@ -337,10 +404,18 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
     const item = await this.moderationCaseModel.findById(caseId);
     if (!item) return null;
 
+    const actionAt = new Date();
+    const reviewDecision = this.getDismissReviewDecision(item);
     item.status = "dismissed";
-    item.actionAt = new Date();
+    item.actionAt = actionAt;
     item.actionBy = adminId ? new Types.ObjectId(adminId) : null;
+    if (reviewDecision) {
+      item.reviewDecision = reviewDecision;
+    }
     const saved = await item.save();
+    if (reviewDecision) {
+      await this.syncAiEvaluationReview(saved, reviewDecision, actionAt);
+    }
     await this.notifyReportDismissed(saved);
     return saved;
   }
@@ -350,10 +425,18 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
     if (!item) return null;
 
     await this.restoreTarget(item.targetType, item.targetId);
+    const actionAt = new Date();
     item.status = "restored";
-    item.actionAt = new Date();
+    item.actionAt = actionAt;
     item.actionBy = adminId ? new Types.ObjectId(adminId) : null;
-    return item.save();
+    if (this.isAiPostCase(item)) {
+      item.reviewDecision = "rejected_violation";
+    }
+    const saved = await item.save();
+    if (this.isAiPostCase(saved)) {
+      await this.syncAiEvaluationReview(saved, "rejected_violation", actionAt);
+    }
+    return saved;
   }
 
   async getSettings() {
@@ -408,6 +491,100 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
         { new: true, upsert: true },
       )
       .lean();
+  }
+
+  private async createAiEvaluation(
+    target: ModerationTarget,
+    input: {
+      isViolation: boolean;
+      category?: ModerationCategory | null;
+      confidence: number;
+      decisionStatus: ModerationAiDecisionStatus;
+      reason: string;
+      moderationCaseId?: Types.ObjectId | null;
+    },
+  ) {
+    if (target.targetType !== "post") return null;
+
+    const targetId = new Types.ObjectId(target.targetId);
+    const existing = input.moderationCaseId
+      ? await this.moderationAiEvaluationModel.findOne({
+          moderationCaseId: input.moderationCaseId,
+        })
+      : await this.moderationAiEvaluationModel.findOne({
+          targetId,
+          isViolation: false,
+          decisionStatus: "approved",
+        });
+    if (existing) return existing;
+
+    return this.moderationAiEvaluationModel.create({
+      targetId,
+      isViolation: input.isViolation,
+      category: input.category || null,
+      confidence: this.clampConfidence(input.confidence),
+      decisionStatus: input.decisionStatus,
+      reason: input.reason,
+      moderationCaseId: input.moderationCaseId || null,
+      reviewDecision: null,
+      reviewedCaseId: null,
+      reviewedAt: null,
+    });
+  }
+
+  private isAiPostCase(item: Pick<ModerationCase, "source" | "targetType">) {
+    return item.source === "ai" && item.targetType === "post";
+  }
+
+  private getDismissReviewDecision(
+    item: Pick<ModerationCase, "source" | "targetType" | "status" | "initialStatus">,
+  ): ModerationReviewDecision | null {
+    if (!this.isAiPostCase(item)) return null;
+    const initialStatus = item.initialStatus || item.status;
+    return initialStatus === "auto_deleted"
+      ? "confirmed_violation"
+      : "rejected_violation";
+  }
+
+  private async syncAiEvaluationReview(
+    item: ModerationCase,
+    reviewDecision: ModerationReviewDecision,
+    reviewedAt: Date,
+  ) {
+    await this.moderationAiEvaluationModel.updateMany(
+      {
+        moderationCaseId: item._id,
+        isViolation: true,
+      },
+      {
+        $set: {
+          reviewDecision,
+          reviewedCaseId: item._id,
+          reviewedAt,
+        },
+      },
+    );
+  }
+
+  private async markApprovedPostFalseNegative(
+    item: ModerationCase,
+    reviewedAt: Date,
+  ) {
+    await this.moderationAiEvaluationModel.updateMany(
+      {
+        targetId: item.targetId,
+        isViolation: false,
+        decisionStatus: "approved",
+        reviewDecision: null,
+      },
+      {
+        $set: {
+          reviewDecision: "confirmed_violation",
+          reviewedCaseId: item._id,
+          reviewedAt,
+        },
+      },
+    );
   }
 
   private async flushExpiredQueues() {
@@ -505,9 +682,22 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
 
       const byId = new Map(targets.map((target) => [target.targetId, target]));
       for (const decision of decisions) {
-        if (!decision.isViolation) continue;
         const target = byId.get(decision.id);
         if (!target) continue;
+
+        if (!decision.isViolation) {
+          if (target.targetType === "post") {
+            await this.createAiEvaluation(target, {
+              isViolation: false,
+              category: null,
+              confidence: 0,
+              decisionStatus: "approved",
+              reason: decision.reason || "AI không phát hiện vi phạm.",
+              moderationCaseId: null,
+            });
+          }
+          continue;
+        }
 
         const confidence = this.clampConfidence(decision.confidence);
         const shouldDelete =
@@ -516,7 +706,7 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
           await this.softDeleteTarget(target.targetType, new Types.ObjectId(target.targetId));
         }
 
-        await this.createViolationCase(target, {
+        const moderationCase = await this.createViolationCase(target, {
           source: "ai",
           category: decision.category || null,
           confidence,
@@ -525,6 +715,17 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
           matchedTerms: [],
           aiRawOutput: decision as unknown as Record<string, unknown>,
         });
+        if (target.targetType === "post" && moderationCase.source === "ai") {
+          await this.createAiEvaluation(target, {
+            isViolation: true,
+            category: decision.category || null,
+            confidence,
+            decisionStatus: shouldDelete ? "auto_deleted" : "pending",
+            reason:
+              decision.reason || "AI phát hiện nội dung có khả năng vi phạm.",
+            moderationCaseId: moderationCase._id as Types.ObjectId,
+          });
+        }
       }
     } catch (error: any) {
       this.logger.warn(`AI moderation batch failed: ${error?.message || error}`);
@@ -563,6 +764,12 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
       category: input.category || null,
       confidence: input.confidence ?? null,
       status: input.status,
+      initialStatus:
+        input.source === "ai" &&
+        (input.status === "pending" || input.status === "auto_deleted")
+          ? input.status
+          : null,
+      reviewDecision: null,
       reason: input.reason,
       matchedTerms: input.matchedTerms,
       reportCount: 0,
@@ -790,6 +997,92 @@ ${JSON.stringify(payload)}
       ...item,
       confidence: this.clampConfidence(sourceConfidence),
     };
+  }
+
+  private getEvaluationLabel(item: {
+    isViolation?: boolean;
+    reviewDecision?: string | null;
+  }) {
+    if (item.isViolation) {
+      if (item.reviewDecision === "confirmed_violation") return "tp";
+      if (item.reviewDecision === "rejected_violation") return "fp";
+      return "excluded";
+    }
+
+    return item.reviewDecision === "confirmed_violation" ? "fn" : null;
+  }
+
+  private calculatePrecisionRecallPoint(
+    evaluations: Array<{
+      isViolation?: boolean;
+      confidence?: unknown;
+      reviewDecision?: string | null;
+    }>,
+    threshold: number,
+  ) {
+    const counts = evaluations.reduce(
+      (acc, item) => {
+        const confidence = this.clampConfidence(item.confidence);
+
+        if (item.isViolation) {
+          if (item.reviewDecision === "confirmed_violation") {
+            if (confidence >= threshold) acc.tp += 1;
+            else acc.fn += 1;
+          } else if (
+            item.reviewDecision === "rejected_violation" &&
+            confidence >= threshold
+          ) {
+            acc.fp += 1;
+          }
+          return acc;
+        }
+
+        if (item.reviewDecision === "confirmed_violation") {
+          acc.fn += 1;
+        }
+        return acc;
+      },
+      { tp: 0, fp: 0, fn: 0 },
+    );
+
+    const scores = this.calculateScores(counts.tp, counts.fp, counts.fn);
+    return {
+      threshold,
+      precision: scores.precision,
+      recall: scores.recall,
+      ...counts,
+    };
+  }
+
+  private getPrecisionRecallThresholds(
+    evaluations: Array<{ isViolation?: boolean; confidence?: unknown }>,
+  ) {
+    const thresholds = new Set<number>([0]);
+    for (const item of evaluations) {
+      if (!item.isViolation) continue;
+      thresholds.add(this.clampConfidence(item.confidence));
+    }
+
+    return [...thresholds].sort((a, b) => a - b);
+  }
+
+  private calculateScores(tp: number, fp: number, fn: number) {
+    const precision = tp + fp > 0 ? tp / (tp + fp) : null;
+    const recall = tp + fn > 0 ? tp / (tp + fn) : null;
+    const f1 =
+      precision !== null && recall !== null && precision + recall > 0
+        ? (2 * precision * recall) / (precision + recall)
+        : null;
+
+    return {
+      precision: this.roundMetric(precision),
+      recall: this.roundMetric(recall),
+      f1: this.roundMetric(f1),
+    };
+  }
+
+  private roundMetric(value: number | null) {
+    return value === null ? null : Number(value.toFixed(4));
   }
 
   private truncateForPrompt(value: string, maxLength: number) {
