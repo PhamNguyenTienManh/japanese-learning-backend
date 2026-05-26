@@ -1,4 +1,4 @@
-import { Controller, Get, Req } from "@nestjs/common";
+import { Controller, Get, Query, Req } from "@nestjs/common";
 import { StatisticService } from "./statistic.service";
 import { Public } from "../auth/public.decorator";
 import { Roles } from "../auth/roles.decorator";
@@ -11,6 +11,15 @@ export class StatisticController {
   async getUserStats(@Req() req: any) {
     const userId = req.user?.sub;
     return this.statisticService.getUserStatistics(userId);
+  }
+
+  @Get("leaderboard")
+  async getJlptLeaderboard(
+    @Req() req: any,
+    @Query("limit") limit?: string,
+  ) {
+    const userId = req.user?.sub;
+    return this.statisticService.getJlptLeaderboard(userId, Number(limit));
   }
 
   @Get()

@@ -71,6 +71,15 @@ type AiCostBackoff = {
   retryAfter: string;
 };
 
+type LeaderboardAggregateRow = {
+  userId: Types.ObjectId;
+  name?: string;
+  avatar?: string;
+  totalMinutes?: number;
+  studyDays?: number;
+  lastStudiedAt?: Date;
+};
+
 @Injectable()
 export class StatisticService {
   private readonly logger = new Logger(StatisticService.name);
@@ -198,6 +207,135 @@ export class StatisticService {
         kanjiLearned,
         testsCompleted,
         averageScore,
+      },
+    };
+  }
+
+  async getJlptLeaderboard(userId: string, limit = 10) {
+    const maxLimit = 100;
+    const safeLimit = Math.min(Math.max(Number(limit) || 10, 1), maxLimit);
+    const currentUserId = new Types.ObjectId(userId);
+    const range = this.getCurrentWeekRange();
+
+    const rows = await this.studyDayModel.aggregate<LeaderboardAggregateRow>([
+      {
+        $match: {
+          date: { $gte: range.from, $lt: range.to },
+          duration_minutes: { $gt: 0 },
+        },
+      },
+      {
+        $group: {
+          _id: "$user_id",
+          totalMinutes: { $sum: "$duration_minutes" },
+          studyDays: { $sum: 1 },
+          lastStudiedAt: { $max: "$date" },
+        },
+      },
+      {
+        $addFields: {
+          userObjectId: {
+            $convert: {
+              input: "$_id",
+              to: "objectId",
+              onError: null,
+              onNull: null,
+            },
+          },
+        },
+      },
+      {
+        $lookup: {
+          from: this.userModel.collection.name,
+          localField: "userObjectId",
+          foreignField: "_id",
+          as: "user",
+        },
+      },
+      {
+        $unwind: {
+          path: "$user",
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+      {
+        $match: {
+          $or: [
+            { "user.status": { $exists: false } },
+            { "user.status": { $ne: "banned" } },
+          ],
+        },
+      },
+      {
+        $lookup: {
+          from: this.profileModel.collection.name,
+          localField: "userObjectId",
+          foreignField: "userId",
+          as: "profile",
+        },
+      },
+      {
+        $unwind: {
+          path: "$profile",
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          userId: { $ifNull: ["$userObjectId", "$_id"] },
+          name: "$profile.name",
+          avatar: "$profile.image_url",
+          totalMinutes: 1,
+          studyDays: 1,
+          lastStudiedAt: 1,
+        },
+      },
+      {
+        $sort: {
+          totalMinutes: -1,
+          studyDays: -1,
+          lastStudiedAt: -1,
+        },
+      },
+    ]);
+
+    const entries = rows.map((row, index) => {
+      const totalMinutes = this.toNumber(row.totalMinutes);
+      const studyDays = this.toNumber(row.studyDays);
+      const entryUserId = String(row.userId);
+
+      return {
+        rank: index + 1,
+        userId: entryUserId,
+        name: row.name || "Người dùng",
+        avatar: row.avatar || "/user.png",
+        totalMinutes,
+        studyDays,
+        averageDailyMinutes:
+          studyDays > 0 ? this.toFixedNumber(totalMinutes / studyDays, 1) : 0,
+        lastStudiedAt: row.lastStudiedAt
+          ? new Date(row.lastStudiedAt).toISOString()
+          : null,
+        isCurrentUser: entryUserId === currentUserId.toString(),
+      };
+    });
+
+    const currentUserRank =
+      entries.find((entry) => entry.isCurrentUser) || null;
+
+    return {
+      entries: entries.slice(0, safeLimit),
+      currentUserRank,
+      totalRankedUsers: entries.length,
+      visibleCount: Math.min(safeLimit, entries.length),
+      hasMore: entries.length > safeLimit && safeLimit < maxLimit,
+      maxLimit,
+      period: {
+        type: "week",
+        timezone: HANOI_TIMEZONE,
+        from: range.from.toISOString(),
+        to: range.to.toISOString(),
       },
     };
   }
@@ -567,6 +705,22 @@ export class StatisticService {
     return { from, to: today.to };
   }
 
+  private getCurrentWeekRange(now = new Date()) {
+    const todayKey = this.getDateKey(now);
+    const localNoon = new Date(`${todayKey}T12:00:00+07:00`);
+    const weekday = this.getWeekdayNumber(localNoon);
+    const daysFromMonday = weekday === 0 ? 6 : weekday - 1;
+    const mondayNoon = new Date(localNoon);
+    mondayNoon.setUTCDate(localNoon.getUTCDate() - daysFromMonday);
+
+    const mondayKey = this.getDateKey(mondayNoon);
+    const from = new Date(`${mondayKey}T00:00:00+07:00`);
+    const to = new Date(from);
+    to.setUTCDate(from.getUTCDate() + 7);
+
+    return { from, to };
+  }
+
   private getTodayRange(now = new Date()) {
     const key = this.getDateKey(now);
     const from = new Date(`${key}T00:00:00+07:00`);
@@ -588,6 +742,24 @@ export class StatisticService {
         .map((part) => [part.type, part.value]),
     );
     return `${values.year}-${values.month}-${values.day}`;
+  }
+
+  private getWeekdayNumber(date: Date) {
+    const weekday = new Intl.DateTimeFormat("en-US", {
+      timeZone: HANOI_TIMEZONE,
+      weekday: "short",
+    }).format(date);
+    const weekdays: Record<string, number> = {
+      Sun: 0,
+      Mon: 1,
+      Tue: 2,
+      Wed: 3,
+      Thu: 4,
+      Fri: 5,
+      Sat: 6,
+    };
+
+    return weekdays[weekday] ?? 1;
   }
 
   private fillDailySeries<T extends Record<string, unknown>>(
@@ -620,6 +792,11 @@ export class StatisticService {
     if (value === null || value === undefined || value === "") return null;
     const numeric = Number(value);
     return Number.isFinite(numeric) ? Number(numeric.toFixed(2)) : null;
+  }
+
+  private toFixedNumber(value: unknown, digits: number) {
+    const numeric = this.toNumber(value);
+    return Number(numeric.toFixed(digits));
   }
 
   private async getAiCostSummary(range: DateRange): Promise<AiCostSummary> {
