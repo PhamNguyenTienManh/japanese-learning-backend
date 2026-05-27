@@ -20,13 +20,16 @@ export class JlptWordService {
     createJlptWordDto: CreateJlptWordDto
   ): Promise<JlptWord> {
     try {
+      const payload: any = { ...createJlptWordDto };
+      if (payload.type === "") payload.type = null;
+
       const existing = await this.jlptWordModel.findOne({
-        word: createJlptWordDto.word,
+        word: payload.word,
       });
       if (existing) {
         throw new ConflictException("This word already exists");
       }
-      const jlpt_word = new this.jlptWordModel(createJlptWordDto);
+      const jlpt_word = new this.jlptWordModel(payload);
       return await jlpt_word.save();
     } catch (error) {
       throw new BadRequestException(`Failed to create word: ${error.message}`);
@@ -109,6 +112,9 @@ export class JlptWordService {
     currentPage: number;
   }> {
     try {
+      const safePage = Math.max(Number(page) || 1, 1);
+      const safeLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
+      const safeLevel = level && level !== "all" ? level : "";
       const filter: any = {};
       // admin wants JLPT items only? nếu cần, giữ isJlpt true (giữ giống trước)
       filter.isJlpt = true;
@@ -117,8 +123,8 @@ export class JlptWordService {
         filter.isDeleted = false;
       } // else includeDeleted=true -> no filter on isDeleted
 
-      if (level) {
-        filter.level = level;
+      if (safeLevel) {
+        filter.level = safeLevel;
       }
 
       if (q && String(q).trim()) {
@@ -131,14 +137,14 @@ export class JlptWordService {
         ];
       }
 
-      const skip = (page - 1) * limit;
+      const skip = (safePage - 1) * safeLimit;
 
       const [items, total] = await Promise.all([
         this.jlptWordModel
           .find(filter)
           .sort({ updatedAt: -1 })
           .skip(skip)
-          .limit(limit)
+          .limit(safeLimit)
           .lean(),
         this.jlptWordModel.countDocuments(filter),
       ]);
@@ -146,8 +152,8 @@ export class JlptWordService {
       return {
         data: items as unknown as JlptWord[],
         total,
-        totalPages: Math.ceil(total / Math.max(1, limit)) || 1,
-        currentPage: page,
+        totalPages: Math.ceil(total / safeLimit) || 1,
+        currentPage: safePage,
       };
     } catch (error) {
       throw new BadRequestException(
@@ -183,12 +189,21 @@ export class JlptWordService {
     if (payload.phonetic && typeof payload.phonetic === "string") {
       payload.phonetic = payload.phonetic.split(/\s*,\s*|\s+/).filter(Boolean);
     }
+    if (payload.type === "") {
+      payload.type = null;
+    }
 
     const updated = await this.jlptWordModel.findByIdAndUpdate(id, payload, {
       new: true,
     });
     if (!updated) throw new NotFoundException("Word not found");
     return updated;
+  }
+
+  async getJlptWordForAdminById(id: string) {
+    const word = await this.jlptWordModel.findById(id).lean();
+    if (!word) throw new NotFoundException("Word not found");
+    return word;
   }
 
   async deleteJlptWord(id: string) {

@@ -6,6 +6,7 @@ import {
   IsString,
   ValidateNested,
   ArrayMinSize,
+  IsBoolean,
 } from "class-validator";
 import { Type } from "class-transformer";
 
@@ -63,4 +64,8 @@ export class CreateJlptGrammarDto {
   @ValidateNested({ each: true })
   @Type(() => UsageDto)
   usages?: UsageDto[];
+
+  @IsOptional()
+  @IsBoolean({ message: "isJlpt must be a boolean value" })
+  isJlpt?: boolean;
 }
