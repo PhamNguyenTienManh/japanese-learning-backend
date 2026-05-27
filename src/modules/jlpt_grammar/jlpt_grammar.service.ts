@@ -98,34 +98,37 @@ export class JlptGrammarService {
     includeDeleted = true
   ) {
     try {
+      const safePage = Math.max(Number(page) || 1, 1);
+      const safeLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
+      const safeLevel = level && level !== "all" ? level : "";
+      const safeQuery = q ? String(q).trim() : "";
       const filter: any = {};
 
       if (!includeDeleted) {
         filter.isDeleted = false;
       }
 
-      if (level) {
-        filter.level = level;
+      if (safeLevel) {
+        filter.level = safeLevel;
       }
 
-      if (q && q.trim()) {
-        const qq = q.trim();
+      if (safeQuery) {
         filter.$or = [
-          { title: { $regex: qq, $options: "i" } },
-          { mean: { $regex: qq, $options: "i" } },
-          { detail: { $regex: qq, $options: "i" } },
-          { examples: { $elemMatch: { $regex: qq, $options: "i" } } },
+          { title: { $regex: safeQuery, $options: "i" } },
+          { mean: { $regex: safeQuery, $options: "i" } },
+          { detail: { $regex: safeQuery, $options: "i" } },
+          { examples: { $elemMatch: { $regex: safeQuery, $options: "i" } } },
         ];
       }
 
-      const skip = (page - 1) * limit;
+      const skip = (safePage - 1) * safeLimit;
 
       const [data, total] = await Promise.all([
         this.jlptGrammarModel
           .find(filter)
           .sort({ updatedAt: -1 })
           .skip(skip)
-          .limit(limit)
+          .limit(safeLimit)
           .lean(),
         this.jlptGrammarModel.countDocuments(filter),
       ]);
@@ -133,8 +136,8 @@ export class JlptGrammarService {
       return {
         data,
         total,
-        totalPages: Math.ceil(total / limit),
-        currentPage: page,
+        totalPages: Math.ceil(total / safeLimit) || 1,
+        currentPage: safePage,
       };
     } catch (error) {
       throw new BadRequestException(
@@ -153,6 +156,16 @@ export class JlptGrammarService {
 
     return updated;
   }
+
+  async getGrammarForAdminById(id: string) {
+    const grammar = await this.jlptGrammarModel.findById(id).lean();
+    if (!grammar) {
+      throw new NotFoundException("Grammar not found");
+    }
+
+    return grammar;
+  }
+
   async deleteGrammar(id: string) {
     const deleted = await this.jlptGrammarModel.findByIdAndUpdate(
       id,

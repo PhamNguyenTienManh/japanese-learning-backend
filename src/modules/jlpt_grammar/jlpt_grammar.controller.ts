@@ -61,6 +61,12 @@ export class JlptGrammarController {
   }
 
   @Public()
+  @Get("admin/:id")
+  async getGrammarForAdminById(@Param("id") id: string) {
+    return this.jlptGrammarService.getGrammarForAdminById(id);
+  }
+
+  @Public()
   @Put(":id")
   async updateGrammar(
     @Param("id") id: string,

@@ -1,4 +1,4 @@
-import { IsArray, IsEnum, IsNotEmpty, IsOptional, IsString, ValidateNested } from 'class-validator';
+import { IsArray, IsBoolean, IsEnum, IsNotEmpty, IsOptional, IsString, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 
 // ----- Example DTO -----
@@ -14,6 +14,10 @@ export class ExampleDto {
   @IsNotEmpty()
   @IsString()
   p: string; // phát âm
+
+  @IsOptional()
+  @IsString()
+  h?: string; // hán việt
 }
 
 // ----- Create JLPT Kanji DTO -----
@@ -60,4 +64,8 @@ export class CreateJlptKanjiDto {
 
   @IsOptional()
   example_on?: Record<string, ExampleDto[]>;
+
+  @IsOptional()
+  @IsBoolean({ message: 'isJlpt must be a boolean value' })
+  isJlpt?: boolean;
 }
