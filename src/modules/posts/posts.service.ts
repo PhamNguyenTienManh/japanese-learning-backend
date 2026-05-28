@@ -4,7 +4,6 @@ import { Model, Types } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
 import { CreatePostDto } from './dto/create-post.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
-import { User } from '../users/schemas/user.schema';
 import { Profile } from '../profiles/schemas/profiles.schema';
 import { Comment } from '../comments/schemas/comments.schema';
 import { UploadService } from '../upload/upload.service';
@@ -22,9 +21,6 @@ export class PostsService {
     constructor(
         @InjectModel(Posts.name)
         private readonly postModel: Model<Posts>,
-
-        @InjectModel(User.name)
-        private readonly userModel: Model<User>,
 
         @InjectModel(Profile.name)
         private readonly profileModel: Model<Profile>,
@@ -228,40 +224,6 @@ export class PostsService {
         return {
             data, countComment
         }
-    }
-
-    async getStats() {
-        const result: object[] = [];
-        const totalPosts = await this.postModel.countDocuments(this.activePostFilter);
-        result.push({ totalPosts });
-
-        const totalMembers = await this.userModel.countDocuments();
-        result.push({ totalMembers });
-
-        const like = await this.postModel.aggregate([
-            {
-                $match: this.activePostFilter
-            },
-            {
-                $project: {
-                    likedCount: { $size: "$liked" }
-                }
-            },
-            {
-                $group: {
-                    _id: null,
-                    totalLikes: { $sum: "$likedCount" }
-                }
-            }
-        ]);
-
-        const totalLikes = like[0]?.totalLikes ?? 0;
-
-        result.push({ totalLikes });
-        result.push({ totalViews: 16 })
-        const merged = Object.assign({}, ...result);
-
-        return merged;
     }
 
     async searchPosts(query: string, page: number, limit: number) {
