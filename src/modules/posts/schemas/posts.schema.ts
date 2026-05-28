@@ -35,6 +35,18 @@ export class Posts extends Document {
   status: number;
   // 0 = ẩn, 1 = chờ duyệt, 2 = công khai,...
 
+  @Prop({ type: Boolean, default: false })
+  isDeleted: boolean;
+
+  @Prop({ type: Date, default: null })
+  deleted_at: Date | null;
+
+  @Prop({ type: Types.ObjectId, ref: 'User', default: null })
+  deleted_by: Types.ObjectId | null;
+
+  @Prop({ type: Date, default: null })
+  edited_at: Date | null;
+
   // @Prop({ type: Number, default: 0 })
   // top: number; 
   // // 1 nếu bài viết được ghim/trending, 0 là bình thường

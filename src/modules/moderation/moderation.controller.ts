@@ -47,6 +47,35 @@ export class ModerationController {
     return this.moderationService.reportPost(postId, req.user?.sub, dto);
   }
 
+  @Post("reports/comments/:commentId")
+  reportComment(
+    @Param("commentId") commentId: string,
+    @Req() req: any,
+    @Body() dto: CreatePostReportDto,
+  ) {
+    return this.moderationService.reportComment(commentId, req.user?.sub, dto);
+  }
+
+  @Post("admin/posts/:postId/delete")
+  @Roles("admin")
+  deletePostWithReason(
+    @Param("postId") postId: string,
+    @Req() req: any,
+    @Body() dto: CreatePostReportDto,
+  ) {
+    return this.moderationService.deletePostWithReason(postId, req.user?.sub, dto);
+  }
+
+  @Post("admin/comments/:commentId/delete")
+  @Roles("admin")
+  deleteCommentWithReason(
+    @Param("commentId") commentId: string,
+    @Req() req: any,
+    @Body() dto: CreatePostReportDto,
+  ) {
+    return this.moderationService.deleteCommentWithReason(commentId, req.user?.sub, dto);
+  }
+
   @Patch("cases/:id/delete")
   @Roles("admin")
   deleteCase(@Param("id") id: string, @Req() req: any) {

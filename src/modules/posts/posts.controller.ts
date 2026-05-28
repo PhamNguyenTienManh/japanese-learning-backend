@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Put, Query, Req, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, Req, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { PostsService } from './posts.service';
 import { CreatePostDto } from './dto/create-post.dto';
 import { Posts } from './schemas/posts.schema';
@@ -79,6 +79,21 @@ export class PostsController {
         return this.postService.getAll(pageNumber, limitNumber);
     }
 
+    @Get("admin")
+    @Roles("admin")
+    async getAllForAdmin(
+        @Query('page') page: string = '1',
+        @Query('limit') limit: string = '10',
+        @Query('q') q: string = '',
+        @Query('category') category: string = 'all',
+        @Query('status') status: string = 'active',
+    ): Promise<{ data: Posts[]; total: number; page: number; limit: number; totalPage: number }> {
+        const pageNumber = parseInt(page, 10);
+        const limitNumber = parseInt(limit, 10);
+
+        return this.postService.getAllForAdmin(pageNumber, limitNumber, q, category, status);
+    }
+
     @Get("/post/:id/accessible")
     async getOneAccessible(
         @Param("id") id: string,
@@ -126,7 +141,13 @@ export class PostsController {
     }
 
     @Delete(":id")
-    async deleteOne(@Param("id") id: string): Promise<Posts|null>{
-        return this.postService.deleteOne(id);
+    async deleteOne(@Param("id") id: string, @Req() req: any): Promise<Posts|null>{
+        return this.postService.deleteOne(id, req.user?.sub);
+    }
+
+    @Patch("admin/:id/restore")
+    @Roles("admin")
+    async restoreOne(@Param("id") id: string, @Req() req: any): Promise<Posts | null> {
+        return this.postService.restoreOne(id, req.user?.sub);
     }
 }
