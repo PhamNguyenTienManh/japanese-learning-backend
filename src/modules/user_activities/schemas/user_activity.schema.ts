@@ -60,3 +60,4 @@ export class UserActivity extends Document {
 export const UserActivitySchema = SchemaFactory.createForClass(UserActivity);
 
 UserActivitySchema.index({ user_id: 1, createdAt: -1 });
+UserActivitySchema.index({ createdAt: 1 }, { expireAfterSeconds: 60 * 60 });
