@@ -68,6 +68,12 @@ export class JlptKanjiController {
     );
   }
 
+  @Public()
+  @Get("admin/:id")
+  async getJlptKanjiForAdminById(@Param("id") id: string) {
+    return this.jlptKanjiService.getJlptKanjiForAdminById(id);
+  }
+
   // ---------------------------
   // UPDATE KANJI
   // ---------------------------

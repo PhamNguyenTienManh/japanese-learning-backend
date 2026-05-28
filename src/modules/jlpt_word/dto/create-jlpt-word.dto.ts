@@ -42,6 +42,7 @@ export class CreateJlptWordDto {
   @IsString({ each: true })
   phonetic: string[];
 
+  @IsOptional()
   @IsEnum(
     [
       'Danh từ',
@@ -57,7 +58,7 @@ export class CreateJlptWordDto {
     ],
     { message: 'Invalid type' }
   )
-  type: string;
+  type?: string | null;
 
   @ValidateNested({ each: true })
   @Type(() => MeaningDto)

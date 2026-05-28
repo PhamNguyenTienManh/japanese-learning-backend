@@ -51,8 +51,10 @@
     "start:debug": "nest start --debug --watch",
     "build": "nest build",
     "seed:word": "ts-node src/seed.ts word",
+    "seed:word-mazii": "ts-node src/seed.ts word-mazii",
     "seed:grammar": "ts-node src/seed.ts grammar",
     "seed:kanji": "ts-node src/seed.ts kanji",
+    "seed:kanji-mazii": "ts-node src/seed.ts kanji-mazii",
     "start:prod": "node dist/main.js"
   },
   "devDependencies": {

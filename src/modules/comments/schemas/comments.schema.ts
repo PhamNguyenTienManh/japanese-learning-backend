@@ -27,6 +27,9 @@ export class Comment extends Document {
 
   @Prop({ type: Boolean, default: false })
   isDeleted: boolean; // Đã xóa hay chưa (xóa mềm)
+
+  @Prop({ type: Date, default: null })
+  edited_at: Date | null; // Thời điểm chỉnh sửa gần nhất
 }
 
 export const CommentSchema = SchemaFactory.createForClass(Comment);

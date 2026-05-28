@@ -1,10 +1,9 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Posts } from './schemas/posts.schema';
 import { Model, Types } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
 import { CreatePostDto } from './dto/create-post.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
-import { object } from 'zod';
 import { User } from '../users/schemas/user.schema';
 import { Profile } from '../profiles/schemas/profiles.schema';
 import { Comment } from '../comments/schemas/comments.schema';
@@ -37,6 +36,8 @@ export class PostsService {
         private readonly moderationService: ModerationService,
         private readonly userActivitiesService: UserActivitiesService,
     ) { }
+
+    private readonly activePostFilter = { status: 1, isDeleted: { $ne: true } };
 
     async create(id: string, dto: CreatePostDto): Promise<Posts> {
         const objectId = new Types.ObjectId(id);
@@ -77,6 +78,7 @@ export class PostsService {
                 ? new Types.ObjectId(dto.category_id)
                 : dto.category_id;
         }
+        (dto as any).edited_at = new Date();
 
         // Xử lý xóa ảnh cũ nếu ảnh mới được upload hoặc ảnh bị xóa
         if (dto.image_url === null && post.image_publicId) {
@@ -95,7 +97,10 @@ export class PostsService {
             }
         }
 
-        return post.updateOne(dto);
+        await post.updateOne(dto);
+        const updatedPost = await this.postModel.findById(id);
+        if (!updatedPost) throw new NotFoundException("Post not found");
+        return updatedPost;
     }
 
     async updateLiked(id: string, userId: string): Promise<Posts> {
@@ -133,7 +138,7 @@ export class PostsService {
 
     async getAll(page: number = 1, limit: number = 10): Promise<{ data: Posts[]; countComment: any[], total: number; page: number; limit: number; totalPage: number }> {
         const skip = (page - 1) * limit;
-        const filter = { status: 1 };
+        const filter = this.activePostFilter;
         const [data, total, countComment] = await Promise.all([
             this.postModel
                 .find(filter).populate("profile_id")
@@ -141,7 +146,7 @@ export class PostsService {
                 .skip(skip)
                 .limit(limit).populate("category_id")
                 .exec(),
-            this.postModel.countDocuments({ status: 1 }).exec(),
+            this.postModel.countDocuments(filter).exec(),
             this.commentModel.aggregate([
                 { $match: { isDeleted: { $ne: true } } },
                 {
@@ -167,7 +172,7 @@ export class PostsService {
     async getOne(id: string): Promise<{ data: Posts | null, countComment: number }> {
         const objectId = new Types.ObjectId(id);
         const [data, countComment] = await Promise.all([
-            this.postModel.findOne({ _id: objectId, status: 1 }).populate("profile_id").populate("category_id", "name"),
+            this.postModel.findOne({ _id: objectId, ...this.activePostFilter }).populate("profile_id").populate("category_id", "name"),
             this.commentModel.countDocuments({ postId: objectId, isDeleted: { $ne: true } })
         ])
         return {
@@ -194,8 +199,10 @@ export class PostsService {
         const ownerUserId = postData.profile_id?.userId
             ? String(postData.profile_id.userId)
             : "";
+        const isActivePost =
+            Number(postData.status) === 1 && postData.isDeleted !== true;
         const canViewHidden =
-            Number(postData.status) === 1 ||
+            isActivePost ||
             role === "admin" ||
             (userId && ownerUserId === String(userId));
 
@@ -225,13 +232,16 @@ export class PostsService {
 
     async getStats() {
         const result: object[] = [];
-        const totalPosts = await this.postModel.countDocuments({ status: 1 });
+        const totalPosts = await this.postModel.countDocuments(this.activePostFilter);
         result.push({ totalPosts });
 
         const totalMembers = await this.userModel.countDocuments();
         result.push({ totalMembers });
 
         const like = await this.postModel.aggregate([
+            {
+                $match: this.activePostFilter
+            },
             {
                 $project: {
                     likedCount: { $size: "$liked" }
@@ -258,8 +268,8 @@ export class PostsService {
         const skip = (page - 1) * limit;
 
         const filter = query
-            ? { title: { $regex: query, $options: 'i' }, status: 1 }
-            : { status: 1 };
+            ? { title: { $regex: query, $options: 'i' }, ...this.activePostFilter }
+            : this.activePostFilter;
 
         const [items, total, countComment] = await Promise.all([
             this.postModel
@@ -296,8 +306,8 @@ export class PostsService {
         const skip = (page - 1) * limit;
 
         const filter = category
-            ? { category_id: objectId, status: 1 }
-            : { status: 1 };
+            ? { category_id: objectId, ...this.activePostFilter }
+            : this.activePostFilter;
 
         const [items, total, countComment] = await Promise.all([
             this.postModel
@@ -331,16 +341,114 @@ export class PostsService {
         };
     }
 
-    async deleteOne(postId: string): Promise<Posts | null> {
+    async getAllForAdmin(
+        page: number = 1,
+        limit: number = 10,
+        query: string = '',
+        category: string = 'all',
+        status: string = 'active',
+    ): Promise<{ data: Posts[]; countComment: any[], total: number; page: number; limit: number; totalPage: number }> {
+        const safePage = Math.max(Number(page) || 1, 1);
+        const safeLimit = Math.min(Math.max(Number(limit) || 10, 1), 100);
+        const skip = (safePage - 1) * safeLimit;
+        const filter: any = {};
+
+        if (query?.trim()) {
+            filter.title = { $regex: query.trim(), $options: 'i' };
+        }
+
+        if (category && category !== 'all') {
+            filter.category_id = new Types.ObjectId(category);
+        }
+
+        if (status === 'deleted') {
+            filter.$or = [{ isDeleted: true }, { status: 0 }];
+        } else if (status === 'all') {
+            // No status constraint: admin can audit both active and deleted posts.
+        } else {
+            Object.assign(filter, this.activePostFilter);
+        }
+
+        const [data, total, countComment] = await Promise.all([
+            this.postModel
+                .find(filter)
+                .populate("profile_id")
+                .populate("category_id")
+                .sort({ created_at: -1, _id: -1 })
+                .skip(skip)
+                .limit(safeLimit)
+                .exec(),
+            this.postModel.countDocuments(filter).exec(),
+            this.commentModel.aggregate([
+                { $match: { isDeleted: { $ne: true } } },
+                {
+                    $group: {
+                        _id: "$postId",
+                        totalComment: { $sum: 1 }
+                    }
+                }
+            ])
+        ]);
+
+        return {
+            data,
+            countComment,
+            total,
+            page: safePage,
+            limit: safeLimit,
+            totalPage: Math.max(Math.ceil(total / safeLimit), 1)
+        };
+    }
+
+    async deleteOne(postId: string, deletedBy?: string): Promise<Posts | null> {
+        const update: any = {
+            status: 0,
+            isDeleted: true,
+            deleted_at: new Date(),
+        };
+
+        if (deletedBy) {
+            update.deleted_by = new Types.ObjectId(deletedBy);
+        }
+
         return this.postModel.findByIdAndUpdate(
             postId,
             {
-                $set: { status: 0 }
+                $set: update
             },
             {
                 new: true
             }
         );
+    }
+
+    async restoreOne(postId: string, restoredBy?: string): Promise<Posts | null> {
+        if (!Types.ObjectId.isValid(postId)) {
+            throw new BadRequestException("Post id không hợp lệ.");
+        }
+
+        await this.moderationService.restorePostByTarget(postId, restoredBy);
+
+        const restoredPost = await this.postModel.findByIdAndUpdate(
+            postId,
+            {
+                $set: {
+                    status: 1,
+                    isDeleted: false,
+                    deleted_at: null,
+                    deleted_by: null,
+                }
+            },
+            {
+                new: true
+            }
+        );
+
+        if (!restoredPost) {
+            throw new NotFoundException("Post not found");
+        }
+
+        return restoredPost;
     }
 
 }

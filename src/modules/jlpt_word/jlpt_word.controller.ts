@@ -58,6 +58,13 @@ export class JlptWordController {
       includeDeleted === "true"
     );
   }
+
+  @Public()
+  @Get("admin/:id")
+  async getJlptWordForAdminById(@Param("id") id: string) {
+    return this.jlptWordService.getJlptWordForAdminById(id);
+  }
+
   // UPDATE (needed by frontend)
   @Public()
   @Put(":id")

@@ -207,7 +207,7 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
     const [
       automatedPending,
       automatedAutoDeleted,
-      userReportPostsPending,
+      userReportsPending,
     ] = await Promise.all([
       this.moderationCaseModel.countDocuments({
         source: automatedSourceFilter,
@@ -219,7 +219,6 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
       }),
       this.moderationCaseModel.countDocuments({
         source: "user_report",
-        targetType: "post",
         status: "pending",
       }),
     ]);
@@ -227,9 +226,10 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
     return {
       automatedPending,
       automatedAutoDeleted,
-      userReportPostsPending,
+      userReportsPending,
+      userReportPostsPending: userReportsPending,
       actionableTotal:
-        automatedPending + automatedAutoDeleted + userReportPostsPending,
+        automatedPending + automatedAutoDeleted + userReportsPending,
     };
   }
 
@@ -400,6 +400,294 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  async reportComment(commentId: string, userId: string, dto: CreatePostReportDto) {
+    if (!Types.ObjectId.isValid(commentId)) {
+      throw new BadRequestException("Comment id không hợp lệ.");
+    }
+    if (!Types.ObjectId.isValid(userId)) {
+      throw new BadRequestException("User id không hợp lệ.");
+    }
+    if (!dto.subcategory?.trim()) {
+      throw new BadRequestException("Vui lòng chọn mục vi phạm cụ thể.");
+    }
+
+    const commentObjectId = new Types.ObjectId(commentId);
+    const userObjectId = new Types.ObjectId(userId);
+    const [comment, reporterProfile] = await Promise.all([
+      this.commentModel
+        .findOne({
+          _id: commentObjectId,
+          status: 1,
+          isDeleted: { $ne: true },
+        })
+        .populate("profileId", "name userId")
+        .lean<any>(),
+      this.profileModel.findOne({ userId: userObjectId }).lean<any>(),
+    ]);
+
+    if (!comment) {
+      throw new NotFoundException("Bình luận không tồn tại hoặc đã bị ẩn.");
+    }
+    if (!reporterProfile) {
+      throw new NotFoundException("Không tìm thấy hồ sơ người báo cáo.");
+    }
+
+    const authorUserId = comment.profileId?.userId
+      ? String(comment.profileId.userId)
+      : "";
+    if (authorUserId && authorUserId === String(userId)) {
+      throw new ForbiddenException("Bạn không thể báo cáo bình luận của chính mình.");
+    }
+
+    const existing = await this.moderationCaseModel.findOne({
+      source: "user_report",
+      targetType: "comment",
+      targetId: commentObjectId,
+      status: "pending",
+    });
+
+    const alreadyReported = existing?.userReports?.some(
+      (report) => String(report.reporterUserId) === String(userId),
+    );
+    if (existing && alreadyReported) {
+      return {
+        alreadyReported: true,
+        message: "Báo cáo bình luận đã được ghi nhận trước đó.",
+        case: existing,
+      };
+    }
+
+    const report = {
+      reporterUserId: userObjectId,
+      reporterProfileId: reporterProfile._id,
+      reporterName: reporterProfile.name || "",
+      category: dto.category,
+      subcategory: dto.subcategory.trim(),
+      description: dto.description?.trim() || "",
+      createdAt: new Date(),
+    };
+
+    if (existing) {
+      existing.userReports = [...(existing.userReports || []), report];
+      existing.reportCount = existing.userReports.length;
+      existing.category = existing.category || dto.category;
+      existing.reason = this.buildUserReportReason(existing.userReports);
+      return {
+        alreadyReported: false,
+        message: "Báo cáo bình luận thành công.",
+        case: await existing.save(),
+      };
+    }
+
+    const created = await this.moderationCaseModel.create({
+      targetType: "comment",
+      targetId: commentObjectId,
+      parentPostId: comment.postId || null,
+      authorId: comment.profileId?._id || null,
+      authorName: comment.profileId?.name || "",
+      title: "Bình luận bị báo cáo",
+      contentSnapshot: comment.content || "",
+      source: "user_report",
+      category: dto.category,
+      confidence: null,
+      status: "pending",
+      reason: this.buildUserReportReason([report]),
+      matchedTerms: [],
+      reportCount: 1,
+      userReports: [report],
+      aiRawOutput: null,
+      actionAt: null,
+    });
+
+    return {
+      alreadyReported: false,
+      message: "Báo cáo bình luận thành công.",
+      case: created,
+    };
+  }
+
+  async deletePostWithReason(
+    postId: string,
+    adminId: string,
+    dto: CreatePostReportDto,
+  ) {
+    if (!Types.ObjectId.isValid(postId)) {
+      throw new BadRequestException("Post id không hợp lệ.");
+    }
+    if (!Types.ObjectId.isValid(adminId)) {
+      throw new BadRequestException("Admin id không hợp lệ.");
+    }
+    if (!dto.subcategory?.trim()) {
+      throw new BadRequestException("Vui lòng chọn mục vi phạm cụ thể.");
+    }
+
+    const targetObjectId = new Types.ObjectId(postId);
+    const adminObjectId = new Types.ObjectId(adminId);
+    const [post, adminProfile] = await Promise.all([
+      this.postModel
+        .findOne({ _id: targetObjectId, status: 1, isDeleted: { $ne: true } })
+        .populate("profile_id", "name userId")
+        .lean<any>(),
+      this.profileModel.findOne({ userId: adminObjectId }).lean<any>(),
+    ]);
+
+    if (!post) {
+      throw new NotFoundException("Bài viết không tồn tại hoặc đã bị ẩn.");
+    }
+    if (!adminProfile) {
+      throw new NotFoundException("Không tìm thấy hồ sơ admin.");
+    }
+
+    const actionAt = new Date();
+    const report = {
+      reporterUserId: adminObjectId,
+      reporterProfileId: adminProfile._id,
+      reporterName: adminProfile.name || "Admin",
+      category: dto.category,
+      subcategory: dto.subcategory.trim(),
+      description: dto.description?.trim() || "",
+      createdAt: actionAt,
+    };
+
+    let item = await this.moderationCaseModel.findOne({
+      targetType: "post",
+      targetId: targetObjectId,
+      status: { $in: ACTIVE_CASE_STATUSES },
+    });
+
+    if (!item) {
+      item = new this.moderationCaseModel({
+        targetType: "post",
+        targetId: targetObjectId,
+        parentPostId: targetObjectId,
+        authorId: post.profile_id?._id || null,
+        authorName: post.profile_id?.name || "",
+        title: post.title || "",
+        contentSnapshot: post.content || "",
+        source: "user_report",
+        category: dto.category,
+        confidence: null,
+        status: "pending",
+        initialStatus: "pending",
+        reason: "",
+        matchedTerms: [],
+        reportCount: 0,
+        userReports: [],
+        aiRawOutput: null,
+        actionAt: null,
+      });
+    }
+
+    item.source = "user_report";
+    item.category = dto.category;
+    item.reason = this.buildUserReportReason([...(item.userReports || []), report]);
+    item.userReports = [...(item.userReports || []), report];
+    item.reportCount = item.userReports.length;
+    item.status = "approved_deleted";
+    item.initialStatus = item.initialStatus || "pending";
+    item.reviewDecision = "confirmed_violation";
+    item.actionAt = actionAt;
+    item.actionBy = adminObjectId;
+
+    await this.softDeleteTarget("post", targetObjectId, adminObjectId);
+    const saved = await item.save();
+    await this.markApprovedPostFalseNegative(saved, actionAt);
+    await this.notifyReportApprovedDeleted(saved);
+    return saved;
+  }
+
+  async deleteCommentWithReason(
+    commentId: string,
+    adminId: string,
+    dto: CreatePostReportDto,
+  ) {
+    if (!Types.ObjectId.isValid(commentId)) {
+      throw new BadRequestException("Comment id không hợp lệ.");
+    }
+    if (!Types.ObjectId.isValid(adminId)) {
+      throw new BadRequestException("Admin id không hợp lệ.");
+    }
+    if (!dto.subcategory?.trim()) {
+      throw new BadRequestException("Vui lòng chọn mục vi phạm cụ thể.");
+    }
+
+    const targetObjectId = new Types.ObjectId(commentId);
+    const adminObjectId = new Types.ObjectId(adminId);
+    const [comment, adminProfile] = await Promise.all([
+      this.commentModel
+        .findOne({
+          _id: targetObjectId,
+          status: 1,
+          isDeleted: { $ne: true },
+        })
+        .populate("profileId", "name userId")
+        .lean<any>(),
+      this.profileModel.findOne({ userId: adminObjectId }).lean<any>(),
+    ]);
+
+    if (!comment) {
+      throw new NotFoundException("Bình luận không tồn tại hoặc đã bị ẩn.");
+    }
+    if (!adminProfile) {
+      throw new NotFoundException("Không tìm thấy hồ sơ admin.");
+    }
+
+    const actionAt = new Date();
+    const report = {
+      reporterUserId: adminObjectId,
+      reporterProfileId: adminProfile._id,
+      reporterName: adminProfile.name || "Admin",
+      category: dto.category,
+      subcategory: dto.subcategory.trim(),
+      description: dto.description?.trim() || "",
+      createdAt: actionAt,
+    };
+
+    let item = await this.moderationCaseModel.findOne({
+      targetType: "comment",
+      targetId: targetObjectId,
+      status: { $in: ACTIVE_CASE_STATUSES },
+    });
+
+    if (!item) {
+      item = new this.moderationCaseModel({
+        targetType: "comment",
+        targetId: targetObjectId,
+        parentPostId: comment.postId || null,
+        authorId: comment.profileId?._id || null,
+        authorName: comment.profileId?.name || "",
+        title: "Bình luận bị xóa bởi admin",
+        contentSnapshot: comment.content || "",
+        source: "user_report",
+        category: dto.category,
+        confidence: null,
+        status: "pending",
+        initialStatus: "pending",
+        reason: "",
+        matchedTerms: [],
+        reportCount: 0,
+        userReports: [],
+        aiRawOutput: null,
+        actionAt: null,
+      });
+    }
+
+    item.source = "user_report";
+    item.category = dto.category;
+    item.reason = this.buildUserReportReason([...(item.userReports || []), report]);
+    item.userReports = [...(item.userReports || []), report];
+    item.reportCount = item.userReports.length;
+    item.status = "approved_deleted";
+    item.initialStatus = item.initialStatus || "pending";
+    item.actionAt = actionAt;
+    item.actionBy = adminObjectId;
+
+    await this.softDeleteTarget("comment", targetObjectId, adminObjectId);
+    const saved = await item.save();
+    await this.notifyReportApprovedDeleted(saved);
+    return saved;
+  }
+
   async dismissCase(caseId: string, adminId?: string) {
     const item = await this.moderationCaseModel.findById(caseId);
     if (!item) return null;
@@ -437,6 +725,50 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
       await this.syncAiEvaluationReview(saved, "rejected_violation", actionAt);
     }
     return saved;
+  }
+
+  async restorePostByTarget(postId: string, adminId?: string) {
+    if (!Types.ObjectId.isValid(postId)) {
+      throw new BadRequestException("Post id không hợp lệ.");
+    }
+
+    const targetObjectId = new Types.ObjectId(postId);
+    const item = await this.moderationCaseModel
+      .findOne({
+        targetType: "post",
+        targetId: targetObjectId,
+        status: "approved_deleted",
+      })
+      .sort({ actionAt: -1, updatedAt: -1 });
+
+    if (item) {
+      return this.restoreCase(String(item._id), adminId);
+    }
+
+    await this.restoreTarget("post", targetObjectId);
+    return null;
+  }
+
+  async restoreCommentByTarget(commentId: string, adminId?: string) {
+    if (!Types.ObjectId.isValid(commentId)) {
+      throw new BadRequestException("Comment id không hợp lệ.");
+    }
+
+    const targetObjectId = new Types.ObjectId(commentId);
+    const item = await this.moderationCaseModel
+      .findOne({
+        targetType: "comment",
+        targetId: targetObjectId,
+        status: { $in: ["approved_deleted", "auto_deleted"] },
+      })
+      .sort({ actionAt: -1, updatedAt: -1 });
+
+    if (item) {
+      return this.restoreCase(String(item._id), adminId);
+    }
+
+    await this.restoreTarget("comment", targetObjectId);
+    return null;
   }
 
   async getSettings() {
@@ -849,9 +1181,17 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
   private async softDeleteTarget(
     targetType: ModerationTargetType,
     targetId: Types.ObjectId,
+    adminId?: Types.ObjectId,
   ) {
     if (targetType === "post") {
-      await this.postModel.findByIdAndUpdate(targetId, { $set: { status: 0 } });
+      await this.postModel.findByIdAndUpdate(targetId, {
+        $set: {
+          status: 0,
+          isDeleted: true,
+          deleted_at: new Date(),
+          deleted_by: adminId || null,
+        },
+      });
       return;
     }
 
@@ -872,7 +1212,14 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
     targetId: Types.ObjectId,
   ) {
     if (targetType === "post") {
-      await this.postModel.findByIdAndUpdate(targetId, { $set: { status: 1 } });
+      await this.postModel.findByIdAndUpdate(targetId, {
+        $set: {
+          status: 1,
+          isDeleted: false,
+          deleted_at: null,
+          deleted_by: null,
+        },
+      });
       return;
     }
 

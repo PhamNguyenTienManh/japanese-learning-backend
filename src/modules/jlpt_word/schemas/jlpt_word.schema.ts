@@ -10,7 +10,8 @@ export class JlptWord extends Document {
   phonetic: string[]; // cách đọc (VD: ["たべる", "タベル"])
 
   @Prop({
-    required: true,
+    type: String,
+    default: null,
     enum: [
       'Danh từ',
       'Động từ',
@@ -22,9 +23,10 @@ export class JlptWord extends Document {
       'Định từ',
       'Liên từ',
       'Thán từ',
+      null,
     ],
   })
-  type: string; // loại từ (danh từ, động từ, ...)
+  type?: string | null; // loại từ (danh từ, động từ, ...)
 
   @Prop({
     type: [
