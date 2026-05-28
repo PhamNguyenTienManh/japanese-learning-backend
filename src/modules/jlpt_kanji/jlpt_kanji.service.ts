@@ -39,6 +39,7 @@ export class JlptKanjiService {
     if (!result) {
       throw new NotFoundException("This word does not exist");
     }
+
     return result;
   }
 

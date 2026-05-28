@@ -4,6 +4,11 @@ import { NotebookItem } from './schemas/notebook-item.schema';
 import { Model, Types } from 'mongoose';
 import { CreateNotebookItemDto } from './dto/create-notebookItem.dto';
 import { Notebook } from '../notebook/schemas/notebook.schema';
+import { UserActivitiesService } from '../user_activities/user_activities.service';
+import {
+    UserActivityTargetType,
+    UserActivityType,
+} from '../user_activities/schemas/user_activity.schema';
 
 @Injectable()
 export class NotebookItemService {
@@ -13,6 +18,7 @@ export class NotebookItemService {
 
         @InjectModel(Notebook.name)
         private readonly notebookModel: Model<Notebook>,
+        private readonly userActivitiesService: UserActivitiesService,
     ) { }
 
     async create(notebookId: string, dto: CreateNotebookItemDto): Promise<NotebookItem> {
@@ -31,7 +37,21 @@ export class NotebookItemService {
 
         dto.notebook_id = notebookId;
         const notebookItem = new this.noteBookItemModel(dto);
-        return notebookItem.save();
+        const savedItem = await notebookItem.save();
+        this.userActivitiesService.createSafely({
+            userId: notebook.user_id,
+            type: UserActivityType.NOTEBOOK_ITEM_ADDED,
+            title: `Đã thêm "${savedItem.name}" vào sổ tay`,
+            targetType: UserActivityTargetType.NOTEBOOK,
+            targetId: notebook._id as Types.ObjectId,
+            metadata: {
+                itemId: String(savedItem._id),
+                itemName: savedItem.name,
+                itemType: savedItem.type,
+                notebookName: notebook.name,
+            },
+        }, "Failed to create notebook item activity:");
+        return savedItem;
     }
 
 

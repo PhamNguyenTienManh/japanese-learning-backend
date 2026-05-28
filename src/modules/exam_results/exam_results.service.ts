@@ -14,6 +14,11 @@ import {
   QuestionContent,
 } from "../exam_question/schemas/exam_question.schema";
 import { ExamQuestionModule } from "../exam_question/exam_question.module";
+import { UserActivitiesService } from "../user_activities/user_activities.service";
+import {
+  UserActivityTargetType,
+  UserActivityType,
+} from "../user_activities/schemas/user_activity.schema";
 
 // ===== INTERFACES =====
 interface QuestionComparison {
@@ -69,7 +74,8 @@ export class ExamResultsService {
     @InjectModel(ExamResultDetail.name)
     private examResultDetailModel: Model<ExamResultDetail>,
     @InjectModel(ExamQuestion.name)
-    private examQuestionModel: Model<ExamQuestionModule>
+    private examQuestionModel: Model<ExamQuestionModule>,
+    private readonly userActivitiesService: UserActivitiesService,
   ) {}
 
   async startExam(examId: string, userId: string): Promise<ExamResult> {
@@ -442,6 +448,28 @@ export class ExamResultsService {
     examResult.status = ExamStatus.COMPLETED;
 
     await examResult.save();
+
+    const exam = await this.examModel.findById(examResult.examId).lean();
+    const examLevel = exam?.level || "N5";
+    const examTitle = exam?.title || "bài thi JLPT";
+    this.userActivitiesService.createSafely({
+      userId,
+      type: UserActivityType.EXAM_COMPLETED,
+      title: `Đã hoàn thành đề thi ${examLevel}: ${examTitle}`,
+      targetType: UserActivityTargetType.EXAM_RESULT,
+      targetId: examResult._id as Types.ObjectId,
+      routeParams: {
+        level: examLevel,
+        testId: String(examResult.examId),
+        examResultId: String(examResult._id),
+      },
+      metadata: {
+        score: totalScore,
+        passed: examResult.passed,
+        duration: examResult.duration,
+        examTitle,
+      },
+    }, "Failed to create exam activity:");
 
     const populated = await this.examResultModel
       .findById(examResultId)

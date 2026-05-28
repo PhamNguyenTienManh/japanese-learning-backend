@@ -6,6 +6,11 @@ import { CreateCommentDto } from './dto/create-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
 import { Profile } from '../profiles/schemas/profiles.schema';
 import { ModerationService } from '../moderation/moderation.service';
+import { UserActivitiesService } from '../user_activities/user_activities.service';
+import {
+    UserActivityTargetType,
+    UserActivityType,
+} from '../user_activities/schemas/user_activity.schema';
 import { Posts } from '../posts/schemas/posts.schema';
 
 @Injectable()
@@ -19,6 +24,7 @@ export class CommentsService {
         @InjectModel(Posts.name)
         private readonly postModel: Model<Posts>,
         private readonly moderationService: ModerationService,
+        private readonly userActivitiesService: UserActivitiesService,
     ) { }
     async create(postId: string, userId: string, dto: CreateCommentDto): Promise<Comment> {
         dto.postId = new Types.ObjectId(postId);
@@ -27,6 +33,16 @@ export class CommentsService {
         const profileId = profile?._id as Types.ObjectId;
         dto.profileId = profileId;
         const comment = await new this.commentModel(dto).save();
+        this.userActivitiesService.createSafely({
+            userId,
+            type: UserActivityType.COMMENT_CREATED,
+            title: "Đã bình luận trong một bài viết",
+            targetType: UserActivityTargetType.POST,
+            targetId: dto.postId,
+            metadata: {
+                commentId: String(comment._id),
+            },
+        }, "Failed to create comment activity:");
         void this.moderationService
             .enqueueCreatedContent("comment", String(comment._id))
             .catch((error) =>

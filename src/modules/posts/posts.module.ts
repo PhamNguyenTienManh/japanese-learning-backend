@@ -8,6 +8,7 @@ import { Profile, ProfileSchema } from '../profiles/schemas/profiles.schema';
 import { Comment, CommentSchema } from '../comments/schemas/comments.schema';
 import { UploadModule } from '../upload/upload.module';
 import { ModerationModule } from '../moderation/moderation.module';
+import { UserActivitiesModule } from '../user_activities/user_activities.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { ModerationModule } from '../moderation/moderation.module';
     ]),
     UploadModule,
     ModerationModule,
+    UserActivitiesModule,
   ],
   providers: [PostsService],
   controllers: [PostsController]
