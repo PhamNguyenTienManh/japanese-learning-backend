@@ -43,6 +43,7 @@ import { RedisModule } from "./redis.module";
 import { ContributionModule } from "./modules/contribution/contribution.module";
 import { UserStudyDayModule } from "./modules/user_study_day/user_study_day.modules";
 import { StatisticModule } from "./modules/statistic/statistic.module";
+import { UserActivitiesModule } from "./modules/user_activities/user_activities.module";
 
 import { TranslateModule } from "./modules/translate/translate.module";
 
@@ -95,6 +96,7 @@ import { ConversationModule } from "./modules/conversation/conversation.module";
     ContributionModule,
     UserStudyDayModule,
     StatisticModule,
+    UserActivitiesModule,
     TranslateModule,
     PdfModule,
     KantanModule,

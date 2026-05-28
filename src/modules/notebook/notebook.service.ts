@@ -1,14 +1,20 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Notebook } from './schemas/notebook.schema';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
 import { CreateNotebookDto } from './dto/create-notebook.dto';
+import { UserActivitiesService } from '../user_activities/user_activities.service';
+import {
+    UserActivityTargetType,
+    UserActivityType,
+} from '../user_activities/schemas/user_activity.schema';
 
 @Injectable()
 export class NotebookService {
     constructor(
         @InjectModel(Notebook.name)
-        private readonly notebook: Model<Notebook>
+        private readonly notebook: Model<Notebook>,
+        private readonly userActivitiesService: UserActivitiesService,
     ) { }
 
     async create(userId: string, dto: CreateNotebookDto): Promise<Notebook> {
@@ -16,7 +22,18 @@ export class NotebookService {
         const existed = await this.notebook.findOne({ name: dto.name })
         if (existed) throw new ConflictException("Name is duplicated");
         const notebook = new this.notebook(dto);
-        return notebook.save();
+        const savedNotebook = await notebook.save();
+        this.userActivitiesService.createSafely({
+            userId,
+            type: UserActivityType.NOTEBOOK_CREATED,
+            title: `Đã tạo sổ tay: ${savedNotebook.name}`,
+            targetType: UserActivityTargetType.NOTEBOOK,
+            targetId: savedNotebook._id as Types.ObjectId,
+            metadata: {
+                notebookName: savedNotebook.name,
+            },
+        }, "Failed to create notebook activity:");
+        return savedNotebook;
     }
 
     async update(id: string, dto: CreateNotebookDto): Promise<Notebook> {

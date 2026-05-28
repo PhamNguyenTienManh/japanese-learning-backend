@@ -10,6 +10,13 @@ import { Profile } from '../profiles/schemas/profiles.schema';
 import { Comment } from '../comments/schemas/comments.schema';
 import { UploadService } from '../upload/upload.service';
 import { ModerationService } from '../moderation/moderation.service';
+import {
+    UserActivitiesService,
+} from '../user_activities/user_activities.service';
+import {
+    UserActivityTargetType,
+    UserActivityType,
+} from '../user_activities/schemas/user_activity.schema';
 
 @Injectable()
 export class PostsService {
@@ -28,6 +35,7 @@ export class PostsService {
 
         private readonly uploadService: UploadService,
         private readonly moderationService: ModerationService,
+        private readonly userActivitiesService: UserActivitiesService,
     ) { }
 
     async create(id: string, dto: CreatePostDto): Promise<Posts> {
@@ -41,6 +49,16 @@ export class PostsService {
         dto.category_id = typeof dto.category_id === 'string' ? new Types.ObjectId(dto.category_id) : dto.category_id;
 
         const post = await new this.postModel(dto).save();
+        this.userActivitiesService.createSafely({
+            userId: id,
+            type: UserActivityType.POST_CREATED,
+            title: `Đã đăng bài: ${post.title}`,
+            targetType: UserActivityTargetType.POST,
+            targetId: post._id as Types.ObjectId,
+            metadata: {
+                postTitle: post.title,
+            },
+        }, "Failed to create post activity:");
         void this.moderationService
             .enqueueCreatedContent("post", String(post._id))
             .catch((error) =>

@@ -2,6 +2,11 @@ import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { UserStudyDay } from './schemas/user_study_day.schema';
+import { UserActivitiesService } from '../user_activities/user_activities.service';
+import {
+  UserActivityTargetType,
+  UserActivityType,
+} from '../user_activities/schemas/user_activity.schema';
 
 
 @Injectable()
@@ -9,6 +14,7 @@ export class UserStudyDayService {
   constructor(
     @InjectModel(UserStudyDay.name)
     private studyDayModel: Model<UserStudyDay>,
+    private readonly userActivitiesService: UserActivitiesService,
   ) {}
 
   /**
@@ -29,6 +35,19 @@ export class UserStudyDayService {
     } else {
       record.duration_minutes += minutes;
       await record.save();
+    }
+
+    if (minutes > 0) {
+      this.userActivitiesService.createSafely({
+        userId,
+        type: UserActivityType.STUDY_TIME_ADDED,
+        title: `Đã học ${minutes} phút`,
+        targetType: UserActivityTargetType.DASHBOARD,
+        metadata: {
+          minutes,
+          date: today.toISOString(),
+        },
+      }, "Failed to create study activity:");
     }
 
     return record;
