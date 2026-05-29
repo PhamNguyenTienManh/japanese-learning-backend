@@ -26,6 +26,11 @@ export class Exam extends Document {
 
   @Prop({ required: true, enum: ExamStatus, default: ExamStatus.DRAFT })
   status: ExamStatus; // Exam status (draft, completed, public, hidden)
+
+  @Prop({ type: Number })
+  maziiExamId?: number; // ID bài thi gốc từ Mazii API
 }
 
 export const ExamSchema = SchemaFactory.createForClass(Exam);
+
+ExamSchema.index({ maziiExamId: 1 }, { unique: true, sparse: true });

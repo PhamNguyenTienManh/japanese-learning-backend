@@ -20,3 +20,4 @@ export class ExamPart extends Document {
 }
 
 export const ExamPartSchema = SchemaFactory.createForClass(ExamPart);
+ExamPartSchema.index({ examId: 1 });

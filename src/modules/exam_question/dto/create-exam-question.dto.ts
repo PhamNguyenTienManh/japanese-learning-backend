@@ -10,6 +10,41 @@ import {
 } from "class-validator";
 import { Type } from "class-transformer";
 
+class AudioDto {
+  @IsOptional()
+  @Min(0)
+  audio_time?: number;
+}
+
+class AudioScriptLineDto {
+  @IsOptional()
+  @IsString()
+  speakerLabel?: string;
+
+  @IsNumber()
+  speakerId: number;
+
+  @IsNotEmpty()
+  @IsString()
+  text: string;
+}
+
+class AudioScriptDto {
+  @IsOptional()
+  @IsString()
+  mode?: "single" | "dialogue";
+
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => AudioScriptLineDto)
+  lines?: AudioScriptLineDto[];
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  pauseMs?: number;
+}
+
 class GeneralInfoDto {
   @IsOptional()
   @IsString()
@@ -27,12 +62,11 @@ class GeneralInfoDto {
   @ValidateNested({ each: true })
   @Type(() => AudioDto)
   audios?: AudioDto[];
-}
 
-class AudioDto {
   @IsOptional()
-  @Min(0)
-  audio_time?: number;
+  @ValidateNested()
+  @Type(() => AudioScriptDto)
+  audioScript?: AudioScriptDto;
 }
 
 class QuestionContentDto {

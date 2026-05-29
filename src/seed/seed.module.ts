@@ -9,6 +9,10 @@ import { JlptGrammar, JlptGrammarSchema } from '../modules/jlpt_grammar/schemas/
 import { JlptKanjiSeeder } from './jlpt-kanji.seed';
 import { JlptKanjiMaziiSeeder } from './jlpt-kanji-mazii.seed';
 import { JlptKanji, JlptKanjiSchema } from '../modules/jlpt_kanji/schemas/jlpt_kanji.schema';
+import { ExamMaziiSeeder } from './exam-mazii.seed';
+import { Exam, ExamSchema } from '../modules/exams/schemas/exams.schema';
+import { ExamPart, ExamPartSchema } from '../modules/exams_part/schema/exams_part.schema';
+import { ExamQuestion, ExamQuestionSchema } from '../modules/exam_question/schemas/exam_question.schema';
 
 
 @Module({
@@ -21,6 +25,9 @@ import { JlptKanji, JlptKanjiSchema } from '../modules/jlpt_kanji/schemas/jlpt_k
       { name: JlptWord.name, schema: JlptWordSchema },
       { name: JlptGrammar.name, schema: JlptGrammarSchema },
       { name: JlptKanji.name, schema: JlptKanjiSchema },
+      { name: Exam.name, schema: ExamSchema },
+      { name: ExamPart.name, schema: ExamPartSchema },
+      { name: ExamQuestion.name, schema: ExamQuestionSchema },
     ]),
   ],
   providers: [
@@ -29,6 +36,7 @@ import { JlptKanji, JlptKanjiSchema } from '../modules/jlpt_kanji/schemas/jlpt_k
     JlptGrammarSeeder,
     JlptKanjiSeeder,
     JlptKanjiMaziiSeeder,
+    ExamMaziiSeeder,
   ],
   exports: [
     JlptWordSeeder,
@@ -36,6 +44,7 @@ import { JlptKanji, JlptKanjiSchema } from '../modules/jlpt_kanji/schemas/jlpt_k
     JlptGrammarSeeder,
     JlptKanjiSeeder,
     JlptKanjiMaziiSeeder,
+    ExamMaziiSeeder,
   ],
 })
 export class SeedModule {}

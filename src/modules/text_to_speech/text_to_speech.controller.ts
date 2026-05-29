@@ -1,9 +1,8 @@
-import { Controller, Post, Body, Res } from '@nestjs/common';
+import { Controller, Get, Post, Body, Res } from '@nestjs/common';
 import { TextToSpeechService } from './text_to_speech.service';
 import { Public } from '../auth/public.decorator';
 import { type Response } from 'express';
-import * as fs from 'fs';
-import { SyncData } from './text_to_speech.service';
+import { DialogueVoiceLine, SyncData } from './text_to_speech.service';
 
 @Controller('text_to_speech')
 export class TextToSpeechController {
@@ -21,6 +20,28 @@ export class TextToSpeechController {
     return {
       audioUrl: result.url,
       syncData: result.syncData
+    };
+  }
+
+  @Public()
+  @Get("speakers")
+  async getSpeakers(): Promise<any[]> {
+    return this.textToSpeechService.getSpeakers();
+  }
+
+  @Public()
+  @Post("dialogue/upload")
+  async createDialogueVoiceAndUpload(
+    @Body() body: { lines: DialogueVoiceLine[]; pauseMs?: number },
+  ): Promise<{ audioUrl: string; syncData: SyncData[] }> {
+    const result = await this.textToSpeechService.generateDialogueVoiceAndUploadToCloudinary(
+      body.lines,
+      body.pauseMs ?? 500,
+    );
+
+    return {
+      audioUrl: result.url,
+      syncData: result.syncData,
     };
   }
 

@@ -14,16 +14,16 @@ export class UpdateExamDto {
   @IsOptional()
   @IsNumber()
   @Min(0)
-  score?: number = 180;
+  score?: number;
 
   @IsOptional()
   @IsNumber()
   @Min(0)
-  pass_score?: number = 80;
+  pass_score?: number;
 
   @IsOptional()
   @IsEnum(ExamStatus, {
     message: "status must be one of: draft, completed, published, hidden",
   })
-  status?: ExamStatus = ExamStatus.DRAFT;
+  status?: ExamStatus;
 }

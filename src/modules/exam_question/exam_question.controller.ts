@@ -27,6 +27,12 @@ export class ExamQuestionController {
   }
 
   @Public()
+  @Delete('batch')
+  async deleteExamQuestions(@Body() body: { questionIds: string[] }) {
+    return await this.examQuestionService.deleteExamQuestions(body.questionIds);
+  }
+
+  @Public()
   @Delete(':questionId')
   async deleteExamQuestion(@Param('questionId') questionId: string) {
     return await this.examQuestionService.deleteExamQuestion(questionId);

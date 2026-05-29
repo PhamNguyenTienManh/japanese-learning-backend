@@ -52,6 +52,40 @@ export class ExamQuestionService {
     }
   }
 
+  async deleteExamQuestions(questionIds: string[]) {
+    try {
+      if (!Array.isArray(questionIds) || questionIds.length === 0) {
+        throw new BadRequestException('questionIds must be a non-empty array');
+      }
+
+      const uniqueQuestionIds = [...new Set(questionIds)];
+      const invalidQuestionId = uniqueQuestionIds.find(
+        (questionId) => !Types.ObjectId.isValid(questionId),
+      );
+
+      if (invalidQuestionId) {
+        throw new BadRequestException(`Invalid questionId: ${invalidQuestionId}`);
+      }
+
+      const objectIds = uniqueQuestionIds.map(
+        (questionId) => new Types.ObjectId(questionId),
+      );
+      const result = await this.examQuestionModel.deleteMany({
+        _id: { $in: objectIds },
+      });
+
+      return {
+        message: 'Exam questions deleted successfully',
+        requestedCount: uniqueQuestionIds.length,
+        deletedCount: result.deletedCount,
+      };
+    } catch (error) {
+      throw new BadRequestException(
+        `Failed to delete exam questions: ${error.message}`,
+      );
+    }
+  }
+
 
   async updateExamQuestion(
     questionId: string,
