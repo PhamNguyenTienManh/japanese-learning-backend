@@ -117,11 +117,61 @@ export class ExamsService {
     return result;
   }
 
-  async getExamsByLevel(level: string): Promise<Exam[]> {
+  async getExamsByLevel(level: string): Promise<any[]> {
+    const buildExamListWithQuestionCount = async (query: Record<string, any>) => {
+      const exams = await this.examModel.find(query).lean();
+      if (!exams.length) return [];
+
+      const examIds = exams.map((exam) => exam._id);
+      const parts = await this.examPartModel
+        .find({ examId: { $in: examIds } })
+        .select("_id examId")
+        .lean();
+
+      const partIds = parts.map((part) => part._id);
+      const questionCounts = await this.examQuestionModel.aggregate<{
+        _id: Types.ObjectId;
+        questionCount: number;
+      }>([
+        { $match: { partId: { $in: partIds } } },
+        {
+          $project: {
+            partId: 1,
+            subQuestionCount: { $size: { $ifNull: ["$content", []] } },
+          },
+        },
+        {
+          $group: {
+            _id: "$partId",
+            questionCount: { $sum: "$subQuestionCount" },
+          },
+        },
+      ]);
+
+      const partToExam = new Map<string, string>();
+      parts.forEach((part) => {
+        partToExam.set(part._id.toString(), part.examId.toString());
+      });
+
+      const questionCountByExam = new Map<string, number>();
+      questionCounts.forEach((item) => {
+        const examId = partToExam.get(item._id.toString());
+        if (!examId) return;
+        questionCountByExam.set(
+          examId,
+          (questionCountByExam.get(examId) || 0) + item.questionCount
+        );
+      });
+
+      return exams.map((exam) => ({
+        ...exam,
+        questionCount: questionCountByExam.get(exam._id.toString()) || 0,
+      }));
+    };
+
     // Nếu level = "all" → lấy hết
     if (level === "all") {
-      const exams = await this.examModel.find({});
-      return exams;
+      return buildExamListWithQuestionCount({});
     }
 
     // Các level hợp lệ
@@ -134,7 +184,7 @@ export class ExamsService {
     }
 
     // Filter theo level
-    const exams = await this.examModel.find({ level });
+    const exams = await buildExamListWithQuestionCount({ level });
 
     if (!exams.length) {
       throw new NotFoundException(`Không tìm thấy đề thi cho level ${level}`);

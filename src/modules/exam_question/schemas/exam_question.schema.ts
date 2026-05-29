@@ -1,6 +1,34 @@
 import { Prop, Schema, SchemaFactory } from "@nestjs/mongoose";
 import { Document, Types } from "mongoose";
 
+@Schema({ _id: false })
+export class AudioScriptLine {
+  @Prop()
+  speakerLabel?: string;
+
+  @Prop()
+  speakerId?: number;
+
+  @Prop()
+  text?: string;
+}
+
+export const AudioScriptLineSchema = SchemaFactory.createForClass(AudioScriptLine);
+
+@Schema({ _id: false })
+export class AudioScript {
+  @Prop({ enum: ["single", "dialogue"], default: "single" })
+  mode?: "single" | "dialogue";
+
+  @Prop({ type: [AudioScriptLineSchema], default: [] })
+  lines?: AudioScriptLine[];
+
+  @Prop({ default: 500 })
+  pauseMs?: number;
+}
+
+export const AudioScriptSchema = SchemaFactory.createForClass(AudioScript);
+
 // -----------------------------------
 // Subdocument: General (thông tin chung của phần thi)
 // -----------------------------------
@@ -20,6 +48,9 @@ export class GeneralInfo {
     default: [],
   })
   audios?: { audio_time: number | null }[]; // danh sách audio kèm thời gian
+
+  @Prop({ type: AudioScriptSchema, default: null })
+  audioScript?: AudioScript;
 }
 
 export const GeneralInfoSchema = SchemaFactory.createForClass(GeneralInfo);
@@ -91,3 +122,4 @@ export class ExamQuestion extends Document {
 }
 
 export const ExamQuestionSchema = SchemaFactory.createForClass(ExamQuestion);
+ExamQuestionSchema.index({ partId: 1 });

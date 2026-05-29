@@ -16,6 +16,12 @@ export interface SyncData {
   t: string; 
 }
 
+export interface DialogueVoiceLine {
+  speakerLabel?: string;
+  speakerId: number;
+  text: string;
+}
+
 @Injectable()
 export class TextToSpeechService {
   private readonly VOICEVOX_URL = 'http://127.0.0.1:50021';
@@ -30,6 +36,154 @@ export class TextToSpeechService {
     const wav = new WaveFile();
     wav.fromScratch(2, sampleRate, '16', new Array(numSamples * 2).fill(0));
     fs.writeFileSync(outputPath, wav.toBuffer());
+  }
+
+  private getVoicevoxQueryDuration(queryData: any): number {
+    let duration = 0;
+
+    queryData?.accent_phrases?.forEach((phrase: any) => {
+      phrase.moras?.forEach((mora: any) => {
+        if (mora.consonant_length) duration += mora.consonant_length;
+        if (mora.vowel_length) duration += mora.vowel_length;
+      });
+      if (phrase.pause_mora?.vowel_length) {
+        duration += phrase.pause_mora.vowel_length;
+      }
+    });
+
+    return duration;
+  }
+
+  private async synthesizeToFile(text: string, speaker: number, outputPath: string): Promise<any> {
+    const queryRes = await fetch(
+      `${this.VOICEVOX_URL}/audio_query?text=${encodeURIComponent(text)}&speaker=${speaker}`,
+      { method: 'POST' },
+    );
+
+    if (!queryRes.ok) {
+      throw new Error(`VOICEVOX audio_query failed: ${queryRes.statusText}`);
+    }
+
+    const queryData: any = await queryRes.json();
+    const synthRes = await fetch(`${this.VOICEVOX_URL}/synthesis?speaker=${speaker}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(queryData),
+    });
+
+    if (!synthRes.ok) {
+      throw new Error(`VOICEVOX synthesis failed: ${synthRes.statusText}`);
+    }
+
+    const audioBuffer = await synthRes.arrayBuffer();
+    fs.writeFileSync(outputPath, Buffer.from(audioBuffer));
+
+    return queryData;
+  }
+
+  async getSpeakers(): Promise<any[]> {
+    const response = await fetch(`${this.VOICEVOX_URL}/speakers`);
+    if (!response.ok) {
+      throw new Error(`VOICEVOX speakers failed: ${response.statusText}`);
+    }
+    return response.json() as Promise<any[]>;
+  }
+
+  async generateDialogueVoiceAndUploadToCloudinary(
+    lines: DialogueVoiceLine[],
+    pauseMs = 500,
+  ): Promise<{ url: string; syncData: SyncData[] }> {
+    const cleanLines = (Array.isArray(lines) ? lines : [])
+      .map((line) => ({
+        speakerLabel: line.speakerLabel?.trim() || '',
+        speakerId: Number(line.speakerId),
+        text: line.text?.trim() || '',
+      }))
+      .filter((line) => line.text && Number.isFinite(line.speakerId));
+
+    if (!cleanLines.length) {
+      throw new Error('Dialogue lines are required');
+    }
+
+    const outputDir = path.join(process.cwd(), 'pronounce_output');
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true });
+    }
+
+    const tempFiles: string[] = [];
+    const timestamp = Date.now();
+    const safePauseMs = Math.max(0, Math.min(Number(pauseMs) || 500, 3000));
+    const silentDuration = safePauseMs / 1000;
+    const speedRate = 0.8;
+    const silenceFile = path.join(outputDir, `silence_${safePauseMs}.wav`);
+    const mergedFile = path.join(outputDir, `voicevox_dialogue_merged_${timestamp}.wav`);
+    const finalFile = path.join(outputDir, `voicevox_dialogue_${timestamp}_slow.wav`);
+    const syncData: SyncData[] = [];
+    let currentTime = 0;
+
+    try {
+      if (!fs.existsSync(silenceFile)) {
+        this.createSilence(silentDuration, silenceFile);
+      }
+
+      for (let i = 0; i < cleanLines.length; i++) {
+        const line = cleanLines[i];
+        const tempFile = path.join(outputDir, `dialogue_${timestamp}_${i}.wav`);
+        const queryData = await this.synthesizeToFile(line.text, line.speakerId, tempFile);
+        const rawDuration = this.getVoicevoxQueryDuration(queryData);
+        const adjustedDuration = rawDuration / speedRate;
+        const start = parseFloat(currentTime.toFixed(3));
+        const end = parseFloat((start + adjustedDuration).toFixed(3));
+
+        syncData.push({
+          s: start,
+          e: end,
+          t: line.speakerLabel ? `${line.speakerLabel}: ${line.text}` : line.text,
+        });
+
+        currentTime = end + (silentDuration / speedRate);
+        tempFiles.push(tempFile);
+      }
+
+      await new Promise<void>((resolve, reject) => {
+        const command = ffmpeg();
+        tempFiles.forEach((file, idx) => {
+          command.input(file);
+          if (idx < tempFiles.length - 1) {
+            command.input(silenceFile);
+          }
+        });
+
+        command
+          .on('error', (err) => reject(err))
+          .on('end', () => resolve())
+          .mergeToFile(mergedFile, outputDir);
+      });
+
+      await new Promise<void>((resolve, reject) => {
+        ffmpeg(mergedFile)
+          .audioFilter(`atempo=${speedRate}`)
+          .on('error', err => reject(err))
+          .on('end', () => resolve())
+          .save(finalFile);
+      });
+
+      const cloudUrl = await this.uploadAudio(finalFile);
+
+      return {
+        url: cloudUrl,
+        syncData,
+      };
+    } catch (err) {
+      console.error('Lỗi khi tạo âm thanh hội thoại:', err);
+      throw new Error('Không thể tạo file âm thanh hội thoại');
+    } finally {
+      [...tempFiles, mergedFile, finalFile].forEach((file) => {
+        if (fs.existsSync(file)) {
+          fs.unlinkSync(file);
+        }
+      });
+    }
   }
 
   async generateVoiceAndUploadToCloudinary(text: string, speaker = 6): Promise<{url: string, syncData: SyncData[]}> {

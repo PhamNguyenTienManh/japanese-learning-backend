@@ -5,6 +5,7 @@ import { JlptWordMaziiSeeder } from './seed/jlpt-word-mazii.seed';
 import { JlptGrammarSeeder } from './seed/jlpt-grammar.seed';
 import { JlptKanjiSeeder } from './seed/jlpt-kanji.seed';
 import { JlptKanjiMaziiSeeder } from './seed/jlpt-kanji-mazii.seed';
+import { ExamMaziiSeeder } from './seed/exam-mazii.seed';
 
 async function bootstrap() {
   const app = await NestFactory.createApplicationContext(SeedModule);
@@ -31,6 +32,15 @@ async function bootstrap() {
       await app.get(JlptKanjiMaziiSeeder).run();
       break;
 
+    case 'exam-mazii':
+      await app
+        .get(ExamMaziiSeeder)
+        .run(
+          process.argv[3] === undefined ? undefined : Number(process.argv[3]),
+          process.argv[4],
+        );
+      break;
+
     case 'all':
       await app.get(JlptWordSeeder).run();
       await app.get(JlptGrammarSeeder).run();
@@ -44,6 +54,7 @@ Sử dụng:
   npm run seed:grammar    → Chỉ seed ngữ pháp
   npm run seed:kanji      → Chỉ seed kanji local
   npm run seed:kanji-mazii → Seed kanji từ Mazii API
+  npm run seed:exam-mazii -- 739 N5 → Seed bài exam từ Mazii API
   ts-node src/seed.ts all → Seed cả từ vựng và ngữ pháp
 `);
   }
