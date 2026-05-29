@@ -4,20 +4,23 @@ import { Model, Types } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
 import { CreatePostDto } from './dto/create-post.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
-import { User } from '../users/schemas/user.schema';
 import { Profile } from '../profiles/schemas/profiles.schema';
 import { Comment } from '../comments/schemas/comments.schema';
 import { UploadService } from '../upload/upload.service';
 import { ModerationService } from '../moderation/moderation.service';
+import {
+    UserActivitiesService,
+} from '../user_activities/user_activities.service';
+import {
+    UserActivityTargetType,
+    UserActivityType,
+} from '../user_activities/schemas/user_activity.schema';
 
 @Injectable()
 export class PostsService {
     constructor(
         @InjectModel(Posts.name)
         private readonly postModel: Model<Posts>,
-
-        @InjectModel(User.name)
-        private readonly userModel: Model<User>,
 
         @InjectModel(Profile.name)
         private readonly profileModel: Model<Profile>,
@@ -27,6 +30,7 @@ export class PostsService {
 
         private readonly uploadService: UploadService,
         private readonly moderationService: ModerationService,
+        private readonly userActivitiesService: UserActivitiesService,
     ) { }
 
     private readonly activePostFilter = { status: 1, isDeleted: { $ne: true } };
@@ -42,6 +46,16 @@ export class PostsService {
         dto.category_id = typeof dto.category_id === 'string' ? new Types.ObjectId(dto.category_id) : dto.category_id;
 
         const post = await new this.postModel(dto).save();
+        this.userActivitiesService.createSafely({
+            userId: id,
+            type: UserActivityType.POST_CREATED,
+            title: `Đã đăng bài: ${post.title}`,
+            targetType: UserActivityTargetType.POST,
+            targetId: post._id as Types.ObjectId,
+            metadata: {
+                postTitle: post.title,
+            },
+        }, "Failed to create post activity:");
         void this.moderationService
             .enqueueCreatedContent("post", String(post._id))
             .catch((error) =>
@@ -210,40 +224,6 @@ export class PostsService {
         return {
             data, countComment
         }
-    }
-
-    async getStats() {
-        const result: object[] = [];
-        const totalPosts = await this.postModel.countDocuments(this.activePostFilter);
-        result.push({ totalPosts });
-
-        const totalMembers = await this.userModel.countDocuments();
-        result.push({ totalMembers });
-
-        const like = await this.postModel.aggregate([
-            {
-                $match: this.activePostFilter
-            },
-            {
-                $project: {
-                    likedCount: { $size: "$liked" }
-                }
-            },
-            {
-                $group: {
-                    _id: null,
-                    totalLikes: { $sum: "$likedCount" }
-                }
-            }
-        ]);
-
-        const totalLikes = like[0]?.totalLikes ?? 0;
-
-        result.push({ totalLikes });
-        result.push({ totalViews: 16 })
-        const merged = Object.assign({}, ...result);
-
-        return merged;
     }
 
     async searchPosts(query: string, page: number, limit: number) {

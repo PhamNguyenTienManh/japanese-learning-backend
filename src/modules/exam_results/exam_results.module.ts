@@ -8,6 +8,7 @@ import { ExamUserAnswer, ExamUserAnswerSchema } from '../exam_user_answers/schem
 import { Exam, ExamSchema } from '../exams/schemas/exams.schema';
 import { ExamResultDetail, ExamResultDetailSchema } from '../exam_results_detail/schemas/exam_results_detail.schema';
 import { ExamQuestion, ExamQuestionSchema } from '../exam_question/schemas/exam_question.schema';
+import { UserActivitiesModule } from '../user_activities/user_activities.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { ExamQuestion, ExamQuestionSchema } from '../exam_question/schemas/exam_
     MongooseModule.forFeature([{ name: Exam.name, schema: ExamSchema }]),
     MongooseModule.forFeature([{ name: ExamResultDetail.name, schema: ExamResultDetailSchema }]),
     MongooseModule.forFeature([{ name: ExamQuestion.name, schema: ExamQuestionSchema }]),
+    UserActivitiesModule,
   ],
   providers: [ExamResultsService],
   controllers: [ExamResultsController]

@@ -114,12 +114,6 @@ export class PostsController {
         return this.postService.getOne(id)
     }
 
-    @Public()
-    @Get("/stats")
-    async getStats(): Promise<any> {
-        return this.postService.getStats();
-    }
-
     @Get('search')
     @Public()
     async searchPosts(

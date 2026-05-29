@@ -5,6 +5,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { Comment, CommentSchema } from './schemas/comments.schema';
 import { Profile, ProfileSchema } from '../profiles/schemas/profiles.schema';
 import { ModerationModule } from '../moderation/moderation.module';
+import { UserActivitiesModule } from '../user_activities/user_activities.module';
 import { Posts, PostSchema } from '../posts/schemas/posts.schema';
 
 @Module({
@@ -15,6 +16,7 @@ import { Posts, PostSchema } from '../posts/schemas/posts.schema';
         {name: Posts.name, schema: PostSchema}
       ]),
       ModerationModule,
+      UserActivitiesModule,
     ],
   providers: [CommentsService],
   controllers: [CommentsController]
