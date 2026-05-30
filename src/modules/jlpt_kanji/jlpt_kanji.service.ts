@@ -35,7 +35,9 @@ export class JlptKanjiService {
       throw new BadRequestException("Invalid word parameter");
     }
 
-    const result = await this.jlptKanjiModel.findOne({ kanji }).lean();
+    const result = await this.jlptKanjiModel
+      .findOne({ kanji: kanji.trim(), isDeleted: { $ne: true } })
+      .lean();
     if (!result) {
       throw new NotFoundException("This word does not exist");
     }
@@ -43,9 +45,80 @@ export class JlptKanjiService {
     return result;
   }
 
+  async searchJlptKanji(q = "", limit = 20) {
+    try {
+      const safeQuery = String(q || "").trim();
+      const safeLimit = Math.min(Math.max(Number(limit) || 20, 1), 50);
+
+      if (!safeQuery) {
+        return {
+          data: [],
+          total: 0,
+          totalPages: 0,
+          currentPage: 1,
+        };
+      }
+
+      const regex = new RegExp(this.escapeRegex(safeQuery), "i");
+      const publicFilter = { isDeleted: { $ne: true } };
+      const projection = {
+        kanji: 1,
+        mean: 1,
+        detail: 1,
+        examples: 1,
+        example_kun: 1,
+        example_on: 1,
+        kun: 1,
+        on: 1,
+        stroke_count: 1,
+        level: 1,
+      };
+      const searchFilter: any = {
+        ...publicFilter,
+        $or: [
+          { kanji: regex },
+          { mean: regex },
+        ],
+      };
+
+      const exactMatch = await this.jlptKanjiModel
+        .findOne({ ...publicFilter, kanji: safeQuery }, projection)
+        .lean();
+      const remainingLimit = exactMatch ? safeLimit - 1 : safeLimit;
+      const [data, total] = await Promise.all([
+        remainingLimit > 0
+          ? this.jlptKanjiModel
+              .find(
+                exactMatch
+                  ? { ...searchFilter, _id: { $ne: exactMatch._id } }
+                  : searchFilter,
+                projection
+              )
+              .sort({ level: 1, kanji: 1 })
+              .limit(remainingLimit)
+              .lean()
+          : Promise.resolve([]),
+        this.jlptKanjiModel.countDocuments(searchFilter),
+      ]);
+
+      const results = exactMatch ? [exactMatch, ...data] : data;
+
+      return {
+        data: results,
+        total,
+        totalPages: Math.ceil(total / safeLimit),
+        currentPage: 1,
+      };
+    } catch (error) {
+      throw new BadRequestException(
+        `Failed to search JLPT kanji: ${error.message}`
+      );
+    }
+  }
+
   async getJlptKanjiPaginated(page = 1, limit = 10, level?: string) {
     try {
-      const query: any = {};
+      const query: any = { isDeleted: { $ne: true } };
       if (level) query.level = level;
       const skip = (page - 1) * limit;
       const [data, total] = await Promise.all([
@@ -75,6 +148,10 @@ export class JlptKanjiService {
         `Failed to get JLPT kanji: ${error.message}`
       );
     }
+  }
+
+  private escapeRegex(value: string) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 
   async getJlptKanjiForAdmin(

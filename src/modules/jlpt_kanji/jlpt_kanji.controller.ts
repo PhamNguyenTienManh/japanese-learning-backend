@@ -34,6 +34,16 @@ export class JlptKanjiController {
     return this.jlptKanjiService.getDetailKanji(kanji);
   }
 
+  @Public()
+  @Get("search")
+  async searchJlptKanji(
+    @Query("q") q = "",
+    @Query("keyword") keyword = "",
+    @Query("limit") limit = 20
+  ) {
+    return this.jlptKanjiService.searchJlptKanji(q || keyword, +limit);
+  }
+
   // ---------------------------
   // USER LIST (formatted)
   // ---------------------------

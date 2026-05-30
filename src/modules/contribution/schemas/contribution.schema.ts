@@ -1,6 +1,6 @@
 import { Prop, Schema, SchemaFactory } from "@nestjs/mongoose";
 import { HydratedDocument, Types } from "mongoose";
-import { Profile } from "src/modules/profiles/schemas/profiles.schema";
+import { Profile } from "../../profiles/schemas/profiles.schema";
 
 export type ContributionDocument = HydratedDocument<Contribution>;
 
