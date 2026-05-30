@@ -6,9 +6,10 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { Model, PipelineStage, Types } from 'mongoose';
+import { Profile } from '../profiles/schemas/profiles.schema';
 import { User } from '../users/schemas/user.schema';
-import { Payment, PaymentCycle } from './schemas/payment.schema';
+import { Payment, PaymentCycle, PaymentStatus } from './schemas/payment.schema';
 import {
   buildZalopayAppTransId,
   buildZalopayCreateBody,
@@ -40,6 +41,13 @@ export interface IpnResult {
   Message: string;
 }
 
+interface AdminPaymentListOptions {
+  page?: number;
+  limit?: number;
+  status?: string;
+  q?: string;
+}
+
 @Injectable()
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
@@ -48,6 +56,7 @@ export class PaymentsService {
   constructor(
     @InjectModel(Payment.name) private paymentModel: Model<Payment>,
     @InjectModel(User.name) private userModel: Model<User>,
+    @InjectModel(Profile.name) private profileModel: Model<Profile>,
     private readonly config: ConfigService,
   ) {}
 
@@ -764,6 +773,260 @@ export class PaymentsService {
     }
     user.premium_expired_date = next;
     await user.save();
+  }
+
+  private escapeRegex(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  private getAdminStatusValues(status?: string): PaymentStatus[] | null {
+    const normalized = (status || 'all').trim().toLowerCase();
+    if (!normalized || normalized === 'all') {
+      return null;
+    }
+
+    const statusMap: Record<string, PaymentStatus[]> = {
+      success: ['success'],
+      failed: ['failed', 'cancelled'],
+      pending: ['pending'],
+      processing: ['pending'],
+      refunded: ['refunded'],
+      cancelled: ['cancelled'],
+    };
+
+    const values = statusMap[normalized];
+    if (!values) {
+      throw new BadRequestException('Invalid payment status');
+    }
+    return values;
+  }
+
+  private getAdminPaymentProjection() {
+    return {
+      _id: 1,
+      userId: 1,
+      orderId: 1,
+      amount: 1,
+      cycle: 1,
+      plan: 1,
+      provider: 1,
+      status: 1,
+      transactionNo: 1,
+      responseCode: 1,
+      bankCode: 1,
+      payDate: 1,
+      ipAddr: 1,
+      paidAt: 1,
+      invoiceSentAt: 1,
+      createdAt: 1,
+      updatedAt: 1,
+      user: {
+        _id: '$user._id',
+        email: '$user.email',
+        role: '$user.role',
+      },
+      profile: {
+        name: '$profile.name',
+        image_url: '$profile.image_url',
+      },
+    };
+  }
+
+  private buildAdminPaymentPipeline(options: {
+    status?: string;
+    q?: string;
+    match?: Record<string, any>;
+  } = {}) {
+    const pipeline: PipelineStage[] = [];
+    const match: Record<string, any> = { ...(options.match || {}) };
+    const statusValues = this.getAdminStatusValues(options.status);
+
+    if (statusValues) {
+      match.status = { $in: statusValues };
+    }
+    if (Object.keys(match).length > 0) {
+      pipeline.push({ $match: match });
+    }
+
+    pipeline.push(
+      {
+        $lookup: {
+          from: this.userModel.collection.name,
+          localField: 'userId',
+          foreignField: '_id',
+          as: 'user',
+        },
+      },
+      { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: {
+          from: this.profileModel.collection.name,
+          localField: 'userId',
+          foreignField: 'userId',
+          as: 'profile',
+        },
+      },
+      { $unwind: { path: '$profile', preserveNullAndEmptyArrays: true } },
+    );
+
+    const q = options.q?.trim();
+    if (q) {
+      const regex = new RegExp(this.escapeRegex(q), 'i');
+      const searchOr: Record<string, any>[] = [
+        { orderId: regex },
+        { transactionNo: regex },
+        { 'user.email': regex },
+        { 'profile.name': regex },
+      ];
+
+      if (Types.ObjectId.isValid(q)) {
+        const objectId = new Types.ObjectId(q);
+        searchOr.push({ _id: objectId }, { userId: objectId });
+      }
+
+      pipeline.push({ $match: { $or: searchOr } });
+    }
+
+    return pipeline;
+  }
+
+  private toAdminPaymentResponse(payment: any) {
+    const userId = payment.user?._id || payment.userId || '';
+    const email = payment.user?.email || '';
+    const name = payment.profile?.name || email || 'Nguoi dung';
+
+    return {
+      id: String(payment._id),
+      orderId: payment.orderId || '',
+      transactionId: payment.transactionNo || payment.orderId || '',
+      transactionNo: payment.transactionNo || '',
+      amount: Number(payment.amount) || 0,
+      cycle: payment.cycle || '',
+      plan: payment.plan || '',
+      provider: payment.provider || '',
+      status: payment.status || 'pending',
+      responseCode: payment.responseCode || '',
+      bankCode: payment.bankCode || '',
+      payDate: payment.payDate || '',
+      ipAddr: payment.ipAddr || '',
+      paidAt: payment.paidAt || null,
+      invoiceSentAt: payment.invoiceSentAt || null,
+      createdAt: payment.createdAt || null,
+      updatedAt: payment.updatedAt || null,
+      user: {
+        id: userId ? String(userId) : '',
+        email,
+        name,
+        avatar: payment.profile?.image_url || '',
+        role: payment.user?.role || '',
+      },
+    };
+  }
+
+  async listForAdmin(options: AdminPaymentListOptions = {}) {
+    const page = Math.max(Number(options.page) || 1, 1);
+    const limit = Math.min(Math.max(Number(options.limit) || 10, 1), 5000);
+    const skip = (page - 1) * limit;
+    const basePipeline = this.buildAdminPaymentPipeline({
+      status: options.status,
+      q: options.q,
+    });
+
+    const [payments, totalRows, statusRows] = await Promise.all([
+      this.paymentModel
+        .aggregate([
+          ...basePipeline,
+          { $sort: { createdAt: -1, _id: -1 } },
+          { $skip: skip },
+          { $limit: limit },
+          { $project: this.getAdminPaymentProjection() },
+        ])
+        .exec(),
+      this.paymentModel
+        .aggregate([...basePipeline, { $count: 'total' }])
+        .exec(),
+      this.paymentModel
+        .aggregate([
+          ...basePipeline,
+          {
+            $group: {
+              _id: '$status',
+              count: { $sum: 1 },
+              amount: { $sum: '$amount' },
+            },
+          },
+        ])
+        .exec(),
+    ]);
+
+    const total = Number(totalRows[0]?.total) || 0;
+    const counts = statusRows.reduce(
+      (acc, row) => {
+        const status = String(row._id || 'unknown');
+        acc[status] = Number(row.count) || 0;
+        acc.totalAmount += Number(row.amount) || 0;
+        if (status === 'success') {
+          acc.successAmount += Number(row.amount) || 0;
+        }
+        return acc;
+      },
+      {
+        pending: 0,
+        success: 0,
+        failed: 0,
+        cancelled: 0,
+        refunded: 0,
+        totalAmount: 0,
+        successAmount: 0,
+      } as Record<string, number>,
+    );
+
+    return {
+      data: payments.map((payment) => this.toAdminPaymentResponse(payment)),
+      total,
+      page,
+      limit,
+      totalPage: Math.max(Math.ceil(total / limit), 1),
+      summary: {
+        total,
+        pending: counts.pending || 0,
+        success: counts.success || 0,
+        failed: (counts.failed || 0) + (counts.cancelled || 0),
+        refunded: counts.refunded || 0,
+        totalAmount: counts.totalAmount || 0,
+        successAmount: counts.successAmount || 0,
+      },
+    };
+  }
+
+  async findAdminPayment(id: string) {
+    const query = String(id || '').trim();
+    if (!query) {
+      throw new BadRequestException('Payment id is required');
+    }
+
+    const matchOr: Record<string, any>[] = [
+      { orderId: query },
+      { transactionNo: query },
+    ];
+
+    if (Types.ObjectId.isValid(query)) {
+      matchOr.push({ _id: new Types.ObjectId(query) });
+    }
+
+    const [payment] = await this.paymentModel
+      .aggregate([
+        ...this.buildAdminPaymentPipeline({ match: { $or: matchOr } }),
+        { $limit: 1 },
+        { $project: this.getAdminPaymentProjection() },
+      ])
+      .exec();
+
+    if (!payment) {
+      throw new NotFoundException('Payment not found');
+    }
+
+    return this.toAdminPaymentResponse(payment);
   }
 
   async findByOrderId(orderId: string): Promise<Payment> {

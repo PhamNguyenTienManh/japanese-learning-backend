@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Headers,
+  Param,
   Post,
   Query,
   Req,
@@ -10,6 +11,7 @@ import {
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { Public } from '../auth/public.decorator';
+import { Roles } from '../auth/roles.decorator';
 import {
   CreateStripePaymentDto,
   CreateZalopayPaymentDto,
@@ -155,5 +157,27 @@ export class PaymentsController {
   @Get('me')
   async listMyPayments(@Req() req: Request & { user: { sub: string } }) {
     return this.paymentsService.listForUser(req.user.sub);
+  }
+
+  @Get('admin')
+  @Roles('admin')
+  async listAdminPayments(
+    @Query('page') page = '1',
+    @Query('limit') limit = '10',
+    @Query('status') status = 'all',
+    @Query('q') q = '',
+  ) {
+    return this.paymentsService.listForAdmin({
+      page: Number(page),
+      limit: Number(limit),
+      status,
+      q,
+    });
+  }
+
+  @Get('admin/:id')
+  @Roles('admin')
+  async getAdminPaymentDetail(@Param('id') id: string) {
+    return this.paymentsService.findAdminPayment(id);
   }
 }
