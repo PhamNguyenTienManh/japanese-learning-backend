@@ -55,6 +55,7 @@
     "seed:grammar": "ts-node src/seed.ts grammar",
     "seed:kanji": "ts-node src/seed.ts kanji",
     "seed:kanji-mazii": "ts-node src/seed.ts kanji-mazii",
+    "seed:kanji-contribution-mazii": "ts-node src/seed.ts kanji-contribution-mazii",
     "seed:exam-mazii": "ts-node src/seed.ts exam-mazii",
     "start:prod": "node dist/main.js"
   },

@@ -5,6 +5,7 @@ import { JlptWordMaziiSeeder } from './seed/jlpt-word-mazii.seed';
 import { JlptGrammarSeeder } from './seed/jlpt-grammar.seed';
 import { JlptKanjiSeeder } from './seed/jlpt-kanji.seed';
 import { JlptKanjiMaziiSeeder } from './seed/jlpt-kanji-mazii.seed';
+import { KanjiContributionMaziiSeeder } from './seed/kanji-contribution-mazii.seed';
 import { ExamMaziiSeeder } from './seed/exam-mazii.seed';
 
 async function bootstrap() {
@@ -24,12 +25,17 @@ async function bootstrap() {
     case 'grammar':
       await app.get(JlptGrammarSeeder).run();
       break;
+
     case 'kanji':
       await app.get(JlptKanjiSeeder).run();
       break;
 
     case 'kanji-mazii':
       await app.get(JlptKanjiMaziiSeeder).run();
+      break;
+
+    case 'kanji-contribution-mazii':
+      await app.get(KanjiContributionMaziiSeeder).run();
       break;
 
     case 'exam-mazii':
@@ -48,14 +54,15 @@ async function bootstrap() {
 
     default:
       console.log(`
-Sử dụng:
-  npm run seed:word       → Chỉ seed từ vựng local
-  npm run seed:word-mazii → Seed từ vựng từ Mazii API
-  npm run seed:grammar    → Chỉ seed ngữ pháp
-  npm run seed:kanji      → Chỉ seed kanji local
-  npm run seed:kanji-mazii → Seed kanji từ Mazii API
-  npm run seed:exam-mazii -- 739 N5 → Seed bài exam từ Mazii API
-  ts-node src/seed.ts all → Seed cả từ vựng và ngữ pháp
+Usage:
+  npm run seed:word
+  npm run seed:word-mazii
+  npm run seed:grammar
+  npm run seed:kanji
+  npm run seed:kanji-mazii
+  npm run seed:kanji-contribution-mazii
+  npm run seed:exam-mazii -- 739 N5
+  ts-node src/seed.ts all
 `);
   }
 
