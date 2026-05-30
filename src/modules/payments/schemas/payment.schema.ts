@@ -1,7 +1,12 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
 
-export type PaymentStatus = 'pending' | 'success' | 'failed' | 'cancelled';
+export type PaymentStatus =
+  | 'pending'
+  | 'success'
+  | 'failed'
+  | 'cancelled'
+  | 'refunded';
 export type PaymentCycle = 'monthly' | 'yearly';
 export type PaymentProvider = 'zalopay' | 'stripe';
 
@@ -27,7 +32,7 @@ export class Payment extends Document {
 
   @Prop({
     required: true,
-    enum: ['pending', 'success', 'failed', 'cancelled'],
+    enum: ['pending', 'success', 'failed', 'cancelled', 'refunded'],
     default: 'pending',
     index: true,
   })
