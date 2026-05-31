@@ -30,6 +30,17 @@ export class JlptWordController {
     return this.jlptWordService.getDetailWord(word);
   }
 
+  // SEARCH (user-facing)
+  @Public()
+  @Get("search")
+  async searchJlptWords(
+    @Query("q") q = "",
+    @Query("keyword") keyword = "",
+    @Query("limit") limit = 20
+  ) {
+    return this.jlptWordService.searchJlptWords(q || keyword, +limit);
+  }
+
   // LIST
   @Public()
   @Get()
