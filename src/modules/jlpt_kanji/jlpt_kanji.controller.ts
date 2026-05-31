@@ -7,10 +7,16 @@ import {
   Delete,
   Param,
   Query,
+  UploadedFile,
+  UseInterceptors,
+  Res,
 } from "@nestjs/common";
 import { JlptKanjiService } from "./jlpt_kanji.service";
 import { Public } from "../auth/public.decorator";
 import { CreateJlptKanjiDto } from "./dto/create-jlpt-kanji.dto";
+import { FileInterceptor } from "@nestjs/platform-express";
+import type { Response } from "express";
+import type { ExcelFile } from "../dictionary-excel/dictionary-excel.util";
 
 @Controller("jlpt-kanji")
 export class JlptKanjiController {
@@ -23,6 +29,34 @@ export class JlptKanjiController {
   @Post()
   async create(@Body() createData: CreateJlptKanjiDto) {
     return this.jlptKanjiService.createJlptKanji(createData);
+  }
+
+  // ---------------------------
+  // BULK IMPORT (from Excel)
+  // ---------------------------
+  @Public()
+  @Post("import")
+  async importKanji(@Body() body: { items: any[] }) {
+    return this.jlptKanjiService.bulkImportKanji(body?.items ?? []);
+  }
+
+  @Public()
+  @Post("import-file")
+  @UseInterceptors(FileInterceptor("file"))
+  async importKanjiFile(@UploadedFile() file: { buffer?: Buffer }) {
+    return this.jlptKanjiService.importKanjiExcel(file);
+  }
+
+  @Public()
+  @Get("template")
+  async downloadTemplate(@Res() res: Response) {
+    this.sendExcel(res, this.jlptKanjiService.buildKanjiTemplateExcel());
+  }
+
+  @Public()
+  @Get("export")
+  async exportKanji(@Res() res: Response) {
+    this.sendExcel(res, await this.jlptKanjiService.exportKanjiExcel());
   }
 
   // ---------------------------
@@ -93,5 +127,14 @@ export class JlptKanjiController {
   @Delete(":id")
   async deleteJlptKanji(@Param("id") id: string) {
     return this.jlptKanjiService.deleteJlptKanji(id);
+  }
+
+  private sendExcel(res: Response, file: ExcelFile) {
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader("Content-Disposition", `attachment; filename="${file.filename}"`);
+    res.send(file.buffer);
   }
 }

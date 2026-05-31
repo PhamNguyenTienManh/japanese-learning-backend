@@ -16,8 +16,8 @@ async function bootstrap() {
     bodyParser.raw({ type: 'application/json' }),
   );
 
-  app.use(bodyParser.urlencoded({ extended: true }));
-  app.use(bodyParser.json());
+  app.use(bodyParser.urlencoded({ extended: true, limit: '25mb' }));
+  app.use(bodyParser.json({ limit: '25mb' }));
   // Đặt prefix cho tất cả route
   app.setGlobalPrefix('api');
   
