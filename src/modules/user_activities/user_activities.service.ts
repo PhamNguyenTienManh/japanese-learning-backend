@@ -93,6 +93,10 @@ export class UserActivitiesService {
   }
 
   async getRecent(userId: string, limit = 10) {
+    return this.getByUser(userId, limit);
+  }
+
+  async getByUser(userId: string, limit = 10) {
     const userObjectId = this.toObjectId(userId);
     if (!userObjectId) return [];
 
