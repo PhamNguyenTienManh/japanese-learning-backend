@@ -7,9 +7,15 @@ import { SignInDto } from './dto/signin.dto';
 import { ForgotPasswordDto } from './dto/forgor-password.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { VerifyRegisterOtpDto } from './dto/verify-register-otp.dto';
-import { AuthGuard as JwtAuthGuard } from './auth.guard';
 import { AuthGuard } from '@nestjs/passport';
-import { clearAuthCookie, extractAuthToken, setAuthCookie } from './auth-cookie';
+import {
+  clearAuthCookie,
+  clearRefreshCookie,
+  extractAuthToken,
+  extractRefreshToken,
+  setAuthCookie,
+  setRefreshCookie,
+} from './auth-cookie';
 
 @Controller('auth')
 export class AuthController {
@@ -35,7 +41,22 @@ export class AuthController {
   ) {
     const data = await this.authService.signIn(signInDto.email, signInDto.password);
     setAuthCookie(response, data.access_token);
+    setRefreshCookie(response, data.refresh_token);
     return { message: 'Login successful' };
+  }
+
+  @HttpCode(HttpStatus.OK)
+  @Public()
+  @Post('refresh')
+  async refresh(
+    @Req() req: Request,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const refreshToken = extractRefreshToken(req);
+    const data = await this.authService.refreshSession(refreshToken);
+    setAuthCookie(response, data.access_token);
+    setRefreshCookie(response, data.refresh_token);
+    return { message: 'Token refreshed' };
   }
 
   @Post('forgot-password')
@@ -51,14 +72,17 @@ export class AuthController {
   }
 
   @Post('logout')
-  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  @Public()
   async logout(
     @Req() req: Request,
     @Res({ passthrough: true }) response: Response,
   ) {
     const token = extractAuthToken(req);
-    const result = await this.authService.logout(token);
+    const refreshToken = extractRefreshToken(req);
+    const result = await this.authService.logout(token, refreshToken);
     clearAuthCookie(response);
+    clearRefreshCookie(response);
     return result;
   }
 
@@ -78,6 +102,7 @@ export class AuthController {
   async googleCallback(@Req() req, @Res() res) {
     const data = await this.authService.validateGoogleUser(req.user);
     setAuthCookie(res, data.access_token);
+    setRefreshCookie(res, data.refresh_token);
     const frontendUrl = (process.env.FRONTEND_URL || '').replace(/\/$/, '');
     return res.redirect(`${frontendUrl}/login?google=success`);
   }
