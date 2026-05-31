@@ -23,6 +23,27 @@ import { VerifyRegisterOtpDto } from "./dto/verify-register-otp.dto";
 import { User } from "../users/schemas/user.schema";
 import { InjectModel } from "@nestjs/mongoose";
 import { Profile } from "../profiles/schemas/profiles.schema";
+import { AUTH_COOKIE_MAX_AGE, REFRESH_COOKIE_MAX_AGE } from "./auth-cookie";
+import {
+  accessTokenExpiresIn,
+  getRefreshTokenSecret,
+  jwtConstants,
+  refreshTokenExpiresIn,
+} from "./constants";
+
+type AuthTokenPair = {
+  access_token: string;
+  refresh_token: string;
+};
+
+type AuthJwtPayload = {
+  sub: string;
+  email: string;
+  role: string;
+  token_type?: "refresh";
+  jti?: string;
+  exp?: number;
+};
 
 @Injectable()
 export class AuthService {
@@ -64,11 +85,55 @@ export class AuthService {
     return this.generateToken(user);
   }
 
-  private async generateToken(user: any): Promise<{ access_token: string }> {
-    const payload = { sub: user._id, email: user.email, role: user.role };
-    const jti = uuidv4();
-    const token = await this.jwtService.signAsync(payload, { jwtid: jti });
-    return { access_token: token };
+  private async generateToken(user: any): Promise<AuthTokenPair> {
+    const payload = this.createAuthPayload(user);
+    return this.signTokenPair(payload);
+  }
+
+  private createAuthPayload(user: any): Omit<AuthJwtPayload, "token_type"> {
+    return {
+      sub: String(user._id ?? user.id),
+      email: user.email,
+      role: user.role,
+    };
+  }
+
+  private async signTokenPair(
+    payload: Omit<AuthJwtPayload, "token_type">,
+  ): Promise<AuthTokenPair> {
+    const accessJti = uuidv4();
+    const refreshJti = uuidv4();
+
+    const [accessToken, refreshToken] = await Promise.all([
+      this.jwtService.signAsync(payload, {
+        secret: jwtConstants.secret,
+        expiresIn: accessTokenExpiresIn,
+        jwtid: accessJti,
+      }),
+      this.jwtService.signAsync(
+        { ...payload, token_type: "refresh" },
+        {
+          secret: getRefreshTokenSecret(),
+          expiresIn: refreshTokenExpiresIn,
+          jwtid: refreshJti,
+        },
+      ),
+    ]);
+
+    await this.cacheManager.set(
+      this.getRefreshTokenCacheKey(refreshJti),
+      payload.sub,
+      REFRESH_COOKIE_MAX_AGE,
+    );
+
+    return {
+      access_token: accessToken,
+      refresh_token: refreshToken,
+    };
+  }
+
+  private getRefreshTokenCacheKey(jti: string) {
+    return `refresh_${jti}`;
   }
 
   async getCurrentSession(payload: any) {
@@ -172,7 +237,7 @@ export class AuthService {
   async signIn(
     email: string,
     password: string
-  ): Promise<{ access_token: string }> {
+  ): Promise<AuthTokenPair> {
     const user = await this.usersService.findByEmail(email);
 
     if (!user) {
@@ -186,13 +251,7 @@ export class AuthService {
     }
     if(user.status === "banned") throw new UnauthorizedException("Your account is banned")
 
-    const payload = { sub: user._id, email: user.email, role: user.role };
-    const jti = uuidv4();
-    const token = await this.jwtService.signAsync(payload, { jwtid: jti });
-
-    return {
-      access_token: token,
-    };
+    return this.generateToken(user);
   }
 
   async forgotPassword(dto: ForgotPasswordDto) {
@@ -243,31 +302,85 @@ export class AuthService {
     });
   }
 
-  async logout(token?: string) {
-    try {
-      if (!token) {
-        throw new BadRequestException("Token không hợp lệ");
-      }
-
-      const decoded = this.jwtService.decode(token) as any;
-      if (!decoded || !decoded.jti) {
-        throw new BadRequestException("Token không hợp lệ");
-      }
-
-      const jti = decoded.jti;
-
-      // Lấy thời gian còn lại của token để set TTL cho blacklist
-      const expiresAt = decoded.exp * 1000;
-      const now = Date.now();
-      const ttl = Math.max(1, Math.floor((expiresAt - now) / 1000)); // giây
-
-      // Đưa token vào blacklist
-      await this.cacheManager.set(`blacklist_${jti}`, true, ttl);
-
-      return { message: "Đăng xuất thành công" };
-    } catch (err) {
-      throw new BadRequestException("Đăng xuất thất bại");
+  async refreshSession(refreshToken?: string): Promise<AuthTokenPair> {
+    if (!refreshToken) {
+      throw new UnauthorizedException("Refresh token không hợp lệ");
     }
+
+    let payload: AuthJwtPayload;
+    try {
+      payload = await this.jwtService.verifyAsync<AuthJwtPayload>(
+        refreshToken,
+        {
+          secret: getRefreshTokenSecret(),
+        },
+      );
+    } catch {
+      throw new UnauthorizedException("Refresh token không hợp lệ");
+    }
+
+    if (payload.token_type !== "refresh" || !payload.sub || !payload.jti) {
+      throw new UnauthorizedException("Refresh token không hợp lệ");
+    }
+
+    const refreshKey = this.getRefreshTokenCacheKey(payload.jti);
+    const storedUserId = await this.cacheManager.get<string>(refreshKey);
+    if (storedUserId !== String(payload.sub)) {
+      throw new UnauthorizedException("Refresh token đã hết hạn");
+    }
+
+    const user = await this.userModel
+      .findById(payload.sub)
+      .select("email role status")
+      .exec();
+
+    if (!user) {
+      await this.cacheManager.del(refreshKey);
+      throw new UnauthorizedException("Không tìm thấy tài khoản này!");
+    }
+
+    if (user.status === "banned") {
+      await this.cacheManager.del(refreshKey);
+      throw new UnauthorizedException("Your account is banned");
+    }
+
+    await this.cacheManager.del(refreshKey);
+    return this.generateToken(user);
+  }
+
+  async logout(accessToken?: string, refreshToken?: string) {
+    await Promise.all([
+      this.revokeAccessToken(accessToken),
+      this.revokeRefreshToken(refreshToken),
+    ]);
+
+    return { message: "Đăng xuất thành công" };
+  }
+
+  private async revokeAccessToken(token?: string) {
+    if (!token) return;
+
+    const decoded = this.jwtService.decode(token) as AuthJwtPayload | null;
+    if (!decoded?.jti || !decoded.exp) return;
+
+    const expiresAt = decoded.exp * 1000;
+    const remainingMs = Math.min(
+      AUTH_COOKIE_MAX_AGE,
+      Math.max(1, expiresAt - Date.now()),
+    );
+
+    if (expiresAt > Date.now()) {
+      await this.cacheManager.set(`blacklist_${decoded.jti}`, true, remainingMs);
+    }
+  }
+
+  private async revokeRefreshToken(token?: string) {
+    if (!token) return;
+
+    const decoded = this.jwtService.decode(token) as AuthJwtPayload | null;
+    if (!decoded?.jti) return;
+
+    await this.cacheManager.del(this.getRefreshTokenCacheKey(decoded.jti));
   }
 
   async getSession(payload: any) {

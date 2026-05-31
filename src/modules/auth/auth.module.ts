@@ -3,7 +3,7 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { UsersModule } from '../users/users.module';
 import { JwtModule } from '@nestjs/jwt';
-import { jwtConstants } from './constants';
+import { accessTokenExpiresIn, jwtConstants } from './constants';
 import { ProfilesModule } from '../profiles/profiles.module';
 import { GoogleStrategy } from './strategies/google.strategy';
 import { MongooseModule } from '@nestjs/mongoose';
@@ -17,7 +17,7 @@ import { Profile, ProfileSchema } from '../profiles/schemas/profiles.schema';
     JwtModule.register({
       global: true,
       secret: jwtConstants.secret,
-      signOptions: { expiresIn: '2h' },
+      signOptions: { expiresIn: accessTokenExpiresIn },
     }),
     MongooseModule.forFeature([
       {name: User.name, schema: UserSchema},
