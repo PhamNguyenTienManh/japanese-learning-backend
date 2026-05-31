@@ -7,10 +7,16 @@ import {
   Put,
   Delete,
   Param,
+  UploadedFile,
+  UseInterceptors,
+  Res,
 } from "@nestjs/common";
 import { Public } from "../auth/public.decorator";
 import { JlptGrammarService } from "./jlpt_grammar.service";
 import { CreateJlptGrammarDto } from "./dto/create-jlpt-grammar.dto";
+import { FileInterceptor } from "@nestjs/platform-express";
+import type { Response } from "express";
+import type { ExcelFile } from "../dictionary-excel/dictionary-excel.util";
 
 @Controller("jlpt-grammar")
 export class JlptGrammarController {
@@ -20,6 +26,32 @@ export class JlptGrammarController {
   @Post()
   async create(@Body() createData: CreateJlptGrammarDto) {
     return this.jlptGrammarService.createJlptGrammar(createData);
+  }
+
+  // BULK IMPORT (from Excel) - validate, skip duplicates
+  @Public()
+  @Post("import")
+  async importGrammar(@Body() body: { items: any[] }) {
+    return this.jlptGrammarService.bulkImportGrammar(body?.items ?? []);
+  }
+
+  @Public()
+  @Post("import-file")
+  @UseInterceptors(FileInterceptor("file"))
+  async importGrammarFile(@UploadedFile() file: { buffer?: Buffer }) {
+    return this.jlptGrammarService.importGrammarExcel(file);
+  }
+
+  @Public()
+  @Get("template")
+  async downloadTemplate(@Res() res: Response) {
+    this.sendExcel(res, this.jlptGrammarService.buildGrammarTemplateExcel());
+  }
+
+  @Public()
+  @Get("export")
+  async exportGrammar(@Res() res: Response) {
+    this.sendExcel(res, await this.jlptGrammarService.exportGrammarExcel());
   }
 
   @Public()
@@ -79,5 +111,14 @@ export class JlptGrammarController {
   @Delete(":id")
   async deleteGrammar(@Param("id") id: string) {
     return this.jlptGrammarService.deleteGrammar(id);
+  }
+
+  private sendExcel(res: Response, file: ExcelFile) {
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader("Content-Disposition", `attachment; filename="${file.filename}"`);
+    res.send(file.buffer);
   }
 }

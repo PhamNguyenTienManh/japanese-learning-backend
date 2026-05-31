@@ -43,6 +43,7 @@
     "stripe": "^22.1.1",
     "uuid": "^13.0.0",
     "wavefile": "^11.0.0",
+    "xlsx": "^0.18.5",
     "zod": "^4.1.12"
   },
   "scripts": {
@@ -57,6 +58,7 @@
     "seed:kanji-mazii": "ts-node src/seed.ts kanji-mazii",
     "seed:kanji-contribution-mazii": "ts-node src/seed.ts kanji-contribution-mazii",
     "seed:exam-mazii": "ts-node src/seed.ts exam-mazii",
+    "normalize:kanji-detail": "ts-node src/scripts/normalize-kanji-detail.ts",
     "start:prod": "node dist/main.js"
   },
   "devDependencies": {

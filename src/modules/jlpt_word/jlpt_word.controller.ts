@@ -7,10 +7,16 @@ import {
   Delete,
   Param,
   Query,
+  UploadedFile,
+  UseInterceptors,
+  Res,
 } from "@nestjs/common";
 import { JlptWordService } from "./jlpt_word.service";
 import { CreateJlptWordDto } from "./dto/create-jlpt-word.dto";
 import { Public } from "../auth/public.decorator";
+import { FileInterceptor } from "@nestjs/platform-express";
+import type { Response } from "express";
+import type { ExcelFile } from "../dictionary-excel/dictionary-excel.util";
 
 @Controller("jlpt-word")
 export class JlptWordController {
@@ -21,6 +27,32 @@ export class JlptWordController {
   @Post()
   async create(@Body() createData: CreateJlptWordDto) {
     return this.jlptWordService.createJlptWord(createData);
+  }
+
+  // BULK IMPORT (from Excel) - validate, skip duplicates
+  @Public()
+  @Post("import")
+  async importWords(@Body() body: { items: any[] }) {
+    return this.jlptWordService.bulkImportWords(body?.items ?? []);
+  }
+
+  @Public()
+  @Post("import-file")
+  @UseInterceptors(FileInterceptor("file"))
+  async importWordsFile(@UploadedFile() file: { buffer?: Buffer }) {
+    return this.jlptWordService.importWordsExcel(file);
+  }
+
+  @Public()
+  @Get("template")
+  async downloadTemplate(@Res() res: Response) {
+    this.sendExcel(res, this.jlptWordService.buildWordTemplateExcel());
+  }
+
+  @Public()
+  @Get("export")
+  async exportWords(@Res() res: Response) {
+    this.sendExcel(res, await this.jlptWordService.exportWordsExcel());
   }
 
   // DETAIL
@@ -91,5 +123,14 @@ export class JlptWordController {
   @Delete(":id")
   async deleteJlptWord(@Param("id") id: string) {
     return this.jlptWordService.deleteJlptWord(id);
+  }
+
+  private sendExcel(res: Response, file: ExcelFile) {
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader("Content-Disposition", `attachment; filename="${file.filename}"`);
+    res.send(file.buffer);
   }
 }
