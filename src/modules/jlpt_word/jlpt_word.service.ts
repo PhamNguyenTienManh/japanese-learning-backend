@@ -49,6 +49,77 @@ export class JlptWordService {
     return result;
   }
 
+  private escapeRegex(value: string) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  async searchJlptWords(q = "", limit = 20) {
+    try {
+      const safeQuery = String(q || "").trim();
+      const safeLimit = Math.min(Math.max(Number(limit) || 20, 1), 50);
+
+      if (!safeQuery) {
+        return {
+          data: [],
+          total: 0,
+          totalPages: 0,
+          currentPage: 1,
+        };
+      }
+
+      const regex = new RegExp(this.escapeRegex(safeQuery), "i");
+      const publicFilter = { isDeleted: { $ne: true } };
+      const projection = {
+        word: 1,
+        phonetic: 1,
+        type: 1,
+        meanings: 1,
+        level: 1,
+      };
+      const searchFilter: any = {
+        ...publicFilter,
+        $or: [
+          { word: regex },
+          { phonetic: { $elemMatch: { $regex: regex } } },
+          { "meanings.meaning": regex },
+        ],
+      };
+
+      const exactMatch = await this.jlptWordModel
+        .findOne({ ...publicFilter, word: safeQuery }, projection)
+        .lean();
+      const remainingLimit = exactMatch ? safeLimit - 1 : safeLimit;
+      const [data, total] = await Promise.all([
+        remainingLimit > 0
+          ? this.jlptWordModel
+              .find(
+                exactMatch
+                  ? { ...searchFilter, _id: { $ne: exactMatch._id } }
+                  : searchFilter,
+                projection
+              )
+              .sort({ level: 1, word: 1 })
+              .limit(remainingLimit)
+              .lean()
+          : Promise.resolve([]),
+        this.jlptWordModel.countDocuments(searchFilter),
+      ]);
+
+      const results = exactMatch ? [exactMatch, ...data] : data;
+
+      return {
+        data: results,
+        total,
+        totalPages: Math.ceil(total / safeLimit),
+        currentPage: 1,
+      };
+    } catch (error) {
+      throw new BadRequestException(
+        `Failed to search JLPT words: ${error.message}`
+      );
+    }
+  }
+
   async getJlptWordsPaginated(
     page = 1,
     limit = 10,
