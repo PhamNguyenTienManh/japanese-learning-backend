@@ -24,6 +24,13 @@ import { Payment } from "../payments/schemas/payment.schema";
 
 const HANOI_TIMEZONE = "Asia/Ho_Chi_Minh";
 const ADMIN_DASHBOARD_DAYS = 30;
+const ADMIN_CHART_RANGES: Record<string, { days: number; label: string }> = {
+  "7d": { days: 7, label: "7 ngày" },
+  "30d": { days: 30, label: "30 ngày" },
+  "90d": { days: 90, label: "3 tháng" },
+  "180d": { days: 180, label: "6 tháng" },
+  "365d": { days: 365, label: "1 năm" },
+};
 const JLPT_LEVELS = ["N5", "N4", "N3", "N2", "N1"] as const;
 const AI_COST_FRESH_TTL_MS = 60 * 60 * 1000;
 const AI_COST_STALE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -42,6 +49,14 @@ interface ProfileLean {
 type DateRange = {
   from: Date;
   to: Date;
+};
+
+type AdminDashboardRangeOptions = {
+  chartRange?: string;
+  userGrowthRange?: string;
+  learningActivityRange?: string;
+  examActivityRange?: string;
+  paymentRange?: string;
 };
 
 type AiCostStatus = "fresh" | "cached" | "stale" | "unavailable";
@@ -377,20 +392,46 @@ export class StatisticService {
     }
   }
 
-  async getAdminDashboard() {
+  async getAdminDashboard(rangeOptions: AdminDashboardRangeOptions = {}) {
     try {
       const range = this.getDashboardRange();
+      const fallbackChartRange = rangeOptions.chartRange || "30d";
+      const userGrowthRangeMeta = this.getAdminChartRange(
+        rangeOptions.userGrowthRange || fallbackChartRange,
+      );
+      const learningActivityRangeMeta = this.getAdminChartRange(
+        rangeOptions.learningActivityRange || fallbackChartRange,
+      );
+      const examActivityRangeMeta = this.getAdminChartRange(
+        rangeOptions.examActivityRange || fallbackChartRange,
+      );
+      const paymentRangeMeta = this.getAdminChartRange(
+        rangeOptions.paymentRange || "30d",
+      );
+      const userGrowthRange = this.getTrailingRange(userGrowthRangeMeta.days);
+      const learningActivityRange = this.getTrailingRange(
+        learningActivityRangeMeta.days,
+      );
+      const examActivityRange = this.getTrailingRange(examActivityRangeMeta.days);
+      const paymentRange = this.getTrailingRange(paymentRangeMeta.days);
       const todayRange = this.getTodayRange();
+      const userGrowth7dRange = this.getTrailingRange(7);
+      const previousUserGrowth7dRange = this.getPreviousRange(userGrowth7dRange);
+      const previousDashboardRange = this.getPreviousRange(range);
       const liveContentFilter = { isDeleted: { $ne: true } };
       const aiCostPromise = this.getAiCostSummary(range);
 
       const [
         totalUsers,
         newUsers30d,
+        newUsers7d,
+        previousNewUsers7d,
         activePremiumUsers,
         userRows,
         studyRows,
+        studySummaryRows,
         examRows,
+        examSummaryRows,
         wordRows,
         kanjiRows,
         grammarRows,
@@ -403,6 +444,8 @@ export class StatisticService {
         examsDraft,
         examsHidden,
         totalPosts,
+        posts30d,
+        previousPosts30d,
         overviewExams,
         examUsageRows,
         recentPosts,
@@ -414,18 +457,56 @@ export class StatisticService {
           registeredAt: { $gte: range.from, $lt: range.to },
         }),
         this.userModel.countDocuments({
+          registeredAt: {
+            $gte: userGrowth7dRange.from,
+            $lt: userGrowth7dRange.to,
+          },
+        }),
+        this.userModel.countDocuments({
+          registeredAt: {
+            $gte: previousUserGrowth7dRange.from,
+            $lt: previousUserGrowth7dRange.to,
+          },
+        }),
+        this.userModel.countDocuments({
           premium_expired_date: { $gt: new Date() },
         }),
         this.userModel.aggregate([
           {
             $match: {
-              registeredAt: { $gte: range.from, $lt: range.to },
+              registeredAt: {
+                $gte: userGrowthRange.from,
+                $lt: userGrowthRange.to,
+              },
             },
           },
           {
             $group: {
               _id: this.dateGroupExpression("registeredAt"),
               users: { $sum: 1 },
+            },
+          },
+        ]),
+        this.studyDayModel.aggregate([
+          {
+            $match: {
+              date: {
+                $gte: learningActivityRange.from,
+                $lt: learningActivityRange.to,
+              },
+            },
+          },
+          {
+            $group: {
+              _id: this.dateGroupExpression("date"),
+              learnerIds: { $addToSet: "$user_id" },
+              studyMinutes: { $sum: "$duration_minutes" },
+            },
+          },
+          {
+            $project: {
+              activeLearners: { $size: "$learnerIds" },
+              studyMinutes: 1,
             },
           },
         ]),
@@ -442,6 +523,25 @@ export class StatisticService {
             $project: {
               activeLearners: { $size: "$learnerIds" },
               studyMinutes: 1,
+            },
+          },
+        ]),
+        this.examResultModel.aggregate([
+          {
+            $match: {
+              status: "completed",
+              end_time: {
+                $gte: examActivityRange.from,
+                $lt: examActivityRange.to,
+              },
+            },
+          },
+          {
+            $group: {
+              _id: this.dateGroupExpression("end_time"),
+              attempts: { $sum: 1 },
+              passed: { $sum: { $cond: ["$passed", 1, 0] } },
+              averageScore: { $avg: "$total_score" },
             },
           },
         ]),
@@ -473,6 +573,15 @@ export class StatisticService {
         this.examModel.countDocuments({ status: "draft" }),
         this.examModel.countDocuments({ status: "hidden" }),
         this.postsModel.countDocuments(),
+        this.postsModel.countDocuments({
+          created_at: { $gte: range.from, $lt: range.to },
+        }),
+        this.postsModel.countDocuments({
+          created_at: {
+            $gte: previousDashboardRange.from,
+            $lt: previousDashboardRange.to,
+          },
+        }),
         this.examModel
           .find()
           .sort({ updatedAt: -1 })
@@ -503,7 +612,7 @@ export class StatisticService {
         this.paymentModel.aggregate([
           {
             $match: {
-              createdAt: { $gte: range.from, $lt: range.to },
+              createdAt: { $gte: paymentRange.from, $lt: paymentRange.to },
               status: { $in: ["pending", "failed"] },
             },
           },
@@ -513,7 +622,7 @@ export class StatisticService {
           {
             $match: {
               status: "success",
-              paidAt: { $gte: range.from, $lt: range.to },
+              paidAt: { $gte: paymentRange.from, $lt: paymentRange.to },
             },
           },
           {
@@ -526,32 +635,45 @@ export class StatisticService {
         ]),
       ]);
 
-      const userGrowth30d = this.fillDailySeries(range, userRows, (row) => ({
+      const userGrowth30d = this.fillDailySeries(userGrowthRange, userRows, (row) => ({
         users: this.toNumber(row.users),
       }));
       const learningActivity30d = this.fillDailySeries(
-        range,
+        learningActivityRange,
         studyRows,
         (row) => ({
           activeLearners: this.toNumber(row.activeLearners),
           studyMinutes: this.toNumber(row.studyMinutes),
         }),
       );
-      const examActivity30d = this.fillDailySeries(range, examRows, (row) => ({
+      const examActivity30d = this.fillDailySeries(examActivityRange, examRows, (row) => ({
         attempts: this.toNumber(row.attempts),
         passed: this.toNumber(row.passed),
         averageScore: this.toNullableNumber(row.averageScore),
       }));
-      const examAttempts30d = examActivity30d.reduce(
+      const learningSummary30d = this.fillDailySeries(
+        range,
+        studySummaryRows,
+        (row) => ({
+          activeLearners: this.toNumber(row.activeLearners),
+          studyMinutes: this.toNumber(row.studyMinutes),
+        }),
+      );
+      const examSummary30d = this.fillDailySeries(range, examSummaryRows, (row) => ({
+        attempts: this.toNumber(row.attempts),
+        passed: this.toNumber(row.passed),
+        averageScore: this.toNullableNumber(row.averageScore),
+      }));
+      const examAttempts30d = examSummary30d.reduce(
         (sum, row) => sum + row.attempts,
         0,
       );
-      const studyMinutes30d = learningActivity30d.reduce(
+      const studyMinutes30d = learningSummary30d.reduce(
         (sum, row) => sum + row.studyMinutes,
         0,
       );
       const activeLearnersToday =
-        learningActivity30d.find(
+        learningSummary30d.find(
           (row) => row.date === this.getDateKey(todayRange.from),
         )?.activeLearners || 0;
       const examUsage = new Map(
@@ -596,12 +718,45 @@ export class StatisticService {
         summary: {
           totalUsers,
           newUsers30d,
+          newUsers7d,
+          userGrowthRate7d: this.calculateGrowthRate(
+            newUsers7d,
+            previousNewUsers7d,
+          ),
           activeLearnersToday,
           studyMinutes30d,
           examAttempts30d,
+          posts30d,
+          postGrowthRate30d: this.calculateGrowthRate(
+            posts30d,
+            previousPosts30d,
+          ),
           activePremiumUsers,
         },
         trends: {
+          ranges: {
+            userGrowth: {
+              key: userGrowthRangeMeta.key,
+              label: userGrowthRangeMeta.label,
+              days: userGrowthRangeMeta.days,
+              from: userGrowthRange.from.toISOString(),
+              to: userGrowthRange.to.toISOString(),
+            },
+            learningActivity: {
+              key: learningActivityRangeMeta.key,
+              label: learningActivityRangeMeta.label,
+              days: learningActivityRangeMeta.days,
+              from: learningActivityRange.from.toISOString(),
+              to: learningActivityRange.to.toISOString(),
+            },
+            examActivity: {
+              key: examActivityRangeMeta.key,
+              label: examActivityRangeMeta.label,
+              days: examActivityRangeMeta.days,
+              from: examActivityRange.from.toISOString(),
+              to: examActivityRange.to.toISOString(),
+            },
+          },
           userGrowth30d,
           learningActivity30d,
           examActivity30d,
@@ -659,6 +814,13 @@ export class StatisticService {
           })),
         },
         payments: {
+          range: {
+            key: paymentRangeMeta.key,
+            label: paymentRangeMeta.label,
+            days: paymentRangeMeta.days,
+            from: paymentRange.from.toISOString(),
+            to: paymentRange.to.toISOString(),
+          },
           revenue30d,
           successfulPayments30d,
           failedPayments30d: paymentStatus.get("failed") || 0,
@@ -703,6 +865,44 @@ export class StatisticService {
     const from = new Date(today.from);
     from.setUTCDate(from.getUTCDate() - (ADMIN_DASHBOARD_DAYS - 1));
     return { from, to: today.to };
+  }
+
+  private getTrailingRange(days: number, now = new Date()): DateRange {
+    const today = this.getTodayRange(now);
+    const from = new Date(today.from);
+    from.setUTCDate(from.getUTCDate() - (days - 1));
+    return { from, to: today.to };
+  }
+
+  private getAdminChartRange(rangeKey?: string) {
+    const key = ADMIN_CHART_RANGES[rangeKey || ""]
+      ? String(rangeKey)
+      : "30d";
+    return {
+      key,
+      ...ADMIN_CHART_RANGES[key],
+    };
+  }
+
+  private getPreviousRange(range: DateRange): DateRange {
+    const durationMs = range.to.getTime() - range.from.getTime();
+    return {
+      from: new Date(range.from.getTime() - durationMs),
+      to: new Date(range.from),
+    };
+  }
+
+  private calculateGrowthRate(current: number, previous: number) {
+    const currentValue = this.toNumber(current);
+    const previousValue = this.toNumber(previous);
+
+    if (previousValue === 0) {
+      return currentValue > 0 ? 100 : 0;
+    }
+
+    return Number(
+      (((currentValue - previousValue) / previousValue) * 100).toFixed(1),
+    );
   }
 
   private getCurrentWeekRange(now = new Date()) {

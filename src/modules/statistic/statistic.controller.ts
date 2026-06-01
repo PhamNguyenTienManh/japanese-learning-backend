@@ -30,7 +30,19 @@ export class StatisticController {
 
   @Get("admin-dashboard")
   @Roles("admin")
-  async getAdminDashboard() {
-    return this.statisticService.getAdminDashboard();
+  async getAdminDashboard(
+    @Query("chartRange") chartRange?: string,
+    @Query("userGrowthRange") userGrowthRange?: string,
+    @Query("learningActivityRange") learningActivityRange?: string,
+    @Query("examActivityRange") examActivityRange?: string,
+    @Query("paymentRange") paymentRange?: string,
+  ) {
+    return this.statisticService.getAdminDashboard({
+      chartRange,
+      userGrowthRange,
+      learningActivityRange,
+      examActivityRange,
+      paymentRange,
+    });
   }
 }
