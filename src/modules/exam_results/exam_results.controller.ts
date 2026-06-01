@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import { ExamResultsService } from './exam_results.service';
 import { ExamResult } from './schemas/exam_results.schema';
 
@@ -19,6 +19,19 @@ export class ExamResultsController {
     @Body() body: { examResultId: string}, @Req() req: any): Promise<ExamResult> {
       const userId = req.user.sub; 
       return this.examResultsService.submitExam(body.examResultId, userId);
+  }
+
+  @Get('admin/statistics/:examId')
+  async getAdminAttemptStatistics(
+    @Param('examId') examId: string,
+    @Query() query: { page?: string; limit?: string; status?: string; q?: string },
+  ) {
+    return this.examResultsService.getAdminExamAttemptStatistics(examId, {
+      page: Number(query.page),
+      limit: Number(query.limit),
+      status: query.status,
+      q: query.q,
+    });
   }
 
   // Xem kết quả chi tiết

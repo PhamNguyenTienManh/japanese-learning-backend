@@ -19,6 +19,7 @@ import {
   UserActivityTargetType,
   UserActivityType,
 } from "../user_activities/schemas/user_activity.schema";
+import { Profile } from "../profiles/schemas/profiles.schema";
 
 // ===== INTERFACES =====
 interface QuestionComparison {
@@ -63,6 +64,13 @@ export interface ExamComparisonResult {
   parts: PartComparison[];
 }
 
+interface AdminAttemptStatsQuery {
+  page?: number;
+  limit?: number;
+  status?: string;
+  q?: string;
+}
+
 @Injectable()
 export class ExamResultsService {
   constructor(
@@ -75,6 +83,7 @@ export class ExamResultsService {
     private examResultDetailModel: Model<ExamResultDetail>,
     @InjectModel(ExamQuestion.name)
     private examQuestionModel: Model<ExamQuestionModule>,
+    @InjectModel(Profile.name) private profileModel: Model<Profile>,
     private readonly userActivitiesService: UserActivitiesService,
   ) {}
 
@@ -197,6 +206,151 @@ export class ExamResultsService {
 
     // IN_PROGRESS (chưa lưu thủ công) → xem như chưa làm
     return { status: "not_started", ...completedMeta };
+  }
+
+  async getAdminExamAttemptStatistics(
+    examId: string,
+    query: AdminAttemptStatsQuery = {},
+  ) {
+    if (!Types.ObjectId.isValid(examId)) {
+      throw new NotFoundException(`Exam with id ${examId} does not exist`);
+    }
+
+    const examObjectId = new Types.ObjectId(examId);
+    const exam = await this.examModel.findById(examObjectId).lean().exec();
+
+    if (!exam) {
+      throw new NotFoundException(`Exam with id ${examId} does not exist`);
+    }
+
+    const status = String(query.status || "all").toLowerCase();
+    const allowedStatuses = new Set([
+      "all",
+      ExamStatus.IN_PROGRESS,
+      ExamStatus.SAVING,
+      ExamStatus.COMPLETED,
+    ]);
+    const normalizedStatus = allowedStatuses.has(status) ? status : "all";
+    const page = Math.max(1, Number(query.page) || 1);
+    const limit = Math.min(100, Math.max(1, Number(query.limit) || 10));
+    const search = String(query.q || "").trim().toLowerCase();
+
+    const allAttempts = await this.examResultModel
+      .find({ examId: examObjectId })
+      .sort({ createdAt: -1 })
+      .populate({
+        path: "userId",
+        model: "User",
+        select: "email",
+      })
+      .lean()
+      .exec();
+
+    const userIds = Array.from(
+      new Set(
+        allAttempts
+          .map((attempt: any) => attempt.userId?._id?.toString?.() || attempt.userId?.toString?.())
+          .filter(Boolean),
+      ),
+    );
+
+    const profiles = userIds.length
+      ? await this.profileModel
+          .find({ userId: { $in: userIds.map((id) => new Types.ObjectId(id)) } })
+          .select("userId name")
+          .lean()
+          .exec()
+      : [];
+
+    const profileByUserId = new Map(
+      profiles.map((profile: any) => [profile.userId?.toString(), profile]),
+    );
+    const maxScore = await this.getExamMaxScore(
+      examObjectId,
+      Number((exam as any)?.score) || 0,
+    );
+
+    const rows = allAttempts.map((attempt: any) => {
+      const userIdValue =
+        attempt.userId?._id?.toString?.() || attempt.userId?.toString?.() || "";
+      const email = attempt.userId?.email || "";
+      const profile = profileByUserId.get(userIdValue);
+      const fallbackName = email ? email.split("@")[0] : "Chưa có tên";
+
+      return {
+        examResultId: attempt._id?.toString(),
+        user: {
+          id: userIdValue,
+          email,
+          name: profile?.name || fallbackName,
+        },
+        status: attempt.status,
+        totalScore: Number(attempt.total_score) || 0,
+        maxScore,
+        passed: Boolean(attempt.passed),
+        duration: Number(attempt.duration) || 0,
+        startTime: attempt.start_time,
+        endTime: attempt.end_time,
+        createdAt: attempt.createdAt,
+      };
+    });
+
+    const completedRows = rows.filter((row) => row.status === ExamStatus.COMPLETED);
+    const passedRows = completedRows.filter((row) => row.passed);
+    const averageScore = completedRows.length
+      ? Math.round(
+          (completedRows.reduce((sum, row) => sum + row.totalScore, 0) /
+            completedRows.length) *
+            10,
+        ) / 10
+      : 0;
+
+    const summary = {
+      totalAttempts: rows.length,
+      completed: completedRows.length,
+      inProgress: rows.filter((row) => row.status === ExamStatus.IN_PROGRESS).length,
+      saving: rows.filter((row) => row.status === ExamStatus.SAVING).length,
+      passed: passedRows.length,
+      failed: completedRows.length - passedRows.length,
+      averageScore,
+      passRate: completedRows.length
+        ? Math.round((passedRows.length / completedRows.length) * 100)
+        : 0,
+    };
+
+    const filteredRows = rows.filter((row) => {
+      const statusMatches =
+        normalizedStatus === "all" || row.status === normalizedStatus;
+      const searchMatches =
+        !search ||
+        row.user.email.toLowerCase().includes(search) ||
+        row.user.name.toLowerCase().includes(search);
+
+      return statusMatches && searchMatches;
+    });
+
+    const total = filteredRows.length;
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    const safePage = Math.min(page, totalPages);
+    const start = (safePage - 1) * limit;
+
+    return {
+      exam: {
+        _id: (exam as any)._id,
+        title: (exam as any).title,
+        level: (exam as any).level,
+        score: (exam as any).score,
+        pass_score: (exam as any).pass_score,
+      },
+      summary,
+      rows: filteredRows.slice(start, start + limit),
+      pagination: {
+        page: safePage,
+        limit,
+        total,
+        totalPages,
+      },
+    };
   }
 
   async getResultDetailByExam(examId: string, userId: string) {
