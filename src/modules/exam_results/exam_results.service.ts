@@ -162,27 +162,41 @@ export class ExamResultsService {
 
   // Kiểm tra trạng thái bài làm của user
   async checkExamStatus(examId: string, userId: string) {
+    const baseFilter = {
+      examId: new Types.ObjectId(examId),
+      userId: new Types.ObjectId(userId),
+    };
+
     const latest = await this.examResultModel
-      .findOne({
-        examId: new Types.ObjectId(examId),
-        userId: new Types.ObjectId(userId),
-      })
+      .findOne(baseFilter)
       .sort({ createdAt: -1 }); // lấy bài mới nhất
 
+    const latestCompleted = await this.examResultModel
+      .findOne({
+        ...baseFilter,
+        status: ExamStatus.COMPLETED,
+      })
+      .sort({ end_time: -1, createdAt: -1 });
+
+    const completedMeta = {
+      hasCompletedResult: Boolean(latestCompleted),
+      completedExamResultId: latestCompleted?._id,
+    };
+
     if (!latest) {
-      return { status: "not_started" };
+      return { status: "not_started", ...completedMeta };
     }
 
     if (latest.status === ExamStatus.COMPLETED) {
-      return { status: "completed", examResultId: latest._id };
+      return { status: "completed", examResultId: latest._id, ...completedMeta };
     }
 
     if (latest.status === ExamStatus.SAVING) {
-      return { status: "saving", examResultId: latest._id };
+      return { status: "saving", examResultId: latest._id, ...completedMeta };
     }
 
     // IN_PROGRESS (chưa lưu thủ công) → xem như chưa làm
-    return { status: "not_started" };
+    return { status: "not_started", ...completedMeta };
   }
 
   async getResultDetailByExam(examId: string, userId: string) {
@@ -193,7 +207,7 @@ export class ExamResultsService {
         userId: new Types.ObjectId(userId),
         status: ExamStatus.COMPLETED,
       })
-      .sort({ createdAt: -1 }) // Lấy bản mới nhất
+      .sort({ end_time: -1, createdAt: -1 }) // Lấy kết quả completed mới nhất
       .populate({
         path: "details",
         model: "ExamResultDetail",
@@ -270,6 +284,9 @@ export class ExamResultsService {
       throw new Error("No answers found for this exam");
     }
 
+    const exam = await this.examModel.findById(examResult.examId).lean();
+    const examMaxScore = Number(exam?.score) || 180;
+    const fallbackMaxScore = await this.getExamMaxScore(examResult.examId, examMaxScore);
     const parts: PartComparison[] = [];
 
     for (const ua of userAnswers) {
@@ -333,7 +350,7 @@ export class ExamResultsService {
             explain: questionContent.explain,
             explainAll: questionContent.explainAll,
             image: questionContent.image,
-            score: questionContent.score ?? 0,
+            score: this.getQuestionScore(examQuestion, contentIdx),
             level: examQuestion.level,
             generalInfo: examQuestion.general
               ? {
@@ -353,7 +370,7 @@ export class ExamResultsService {
         partId: partIdValue.toString(),
         partTitle: partInfo?.name || `Part ${parts.length + 1}`,
         score: ua.score,
-        maxScore: 180,
+        maxScore: Number(partInfo?.max_score) || 0,
         questions,
       });
     }
@@ -361,7 +378,7 @@ export class ExamResultsService {
     return {
       examResultId,
       totalScore: examResult.total_score,
-      maxScore: 180,
+      maxScore: fallbackMaxScore,
       passed: examResult.passed,
       duration: examResult.duration,
       parts,
@@ -387,6 +404,7 @@ export class ExamResultsService {
       throw new Error("No answers found for this exam");
     }
 
+    const exam = await this.examModel.findById(examResult.examId).lean();
     let totalScore = 0;
     const detailIds: Types.ObjectId[] = [];
 
@@ -419,7 +437,10 @@ export class ExamResultsService {
 
           const questionContent = examQuestion.content[ans.subQuestionIndex];
           if (ans.isCorrect && questionContent) {
-            partScore += questionContent.score || 1;
+            partScore += this.getQuestionScore(
+              examQuestion,
+              ans.subQuestionIndex,
+            );
           }
         }
       }
@@ -443,13 +464,12 @@ export class ExamResultsService {
     examResult.end_time = new Date();
     examResult.duration =
       (examResult.end_time.getTime() - examResult.start_time.getTime()) / 1000;
-    examResult.passed = totalScore >= 80;
+    examResult.passed = totalScore >= (Number(exam?.pass_score) || 80);
     examResult.details = detailIds;
     examResult.status = ExamStatus.COMPLETED;
 
     await examResult.save();
 
-    const exam = await this.examModel.findById(examResult.examId).lean();
     const examLevel = exam?.level || "N5";
     const examTitle = exam?.title || "bài thi JLPT";
     this.userActivitiesService.createSafely({
@@ -488,5 +508,35 @@ export class ExamResultsService {
     }
 
     return populated as unknown as ExamResult;
+  }
+
+  private getQuestionScore(
+    examQuestion: Pick<ExamQuestion, "scores">,
+    subQuestionIndex: number,
+  ): number {
+    const scoreFromScores = Number(examQuestion.scores?.[subQuestionIndex]);
+    if (Number.isFinite(scoreFromScores) && scoreFromScores > 0) {
+      return scoreFromScores;
+    }
+
+    return 1;
+  }
+
+  private async getExamMaxScore(
+    examId: Types.ObjectId,
+    fallbackScore: number,
+  ): Promise<number> {
+    if (Number.isFinite(fallbackScore) && fallbackScore > 0) return fallbackScore;
+
+    const parts = await this.examPartModel
+      .find({ examId }, { max_score: 1 })
+      .lean()
+      .exec();
+    const partTotal = parts.reduce(
+      (sum, part: any) => sum + (Number(part.max_score) || 0),
+      0,
+    );
+
+    return partTotal || 180;
   }
 }
