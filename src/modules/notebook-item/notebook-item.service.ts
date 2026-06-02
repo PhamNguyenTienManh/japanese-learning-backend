@@ -22,13 +22,14 @@ export class NotebookItemService {
     ) { }
 
     async create(notebookId: string, dto: CreateNotebookItemDto): Promise<NotebookItem> {
-        const notebook = await this.notebookModel.findById(notebookId);
+        const notebook = await this.notebookModel.findOne({ _id: notebookId, isDeleted: { $ne: true } });
         if (!notebook) throw new NotFoundException("Notebook not found");
 
         const existed = await this.noteBookItemModel.findOne({
             notebook_id: notebookId,
             name: dto.name,
             type: dto.type,
+            isDeleted: { $ne: true },
         });
 
         if (existed) {
@@ -56,19 +57,34 @@ export class NotebookItemService {
 
 
     async update(id: string, dto: CreateNotebookItemDto): Promise<any>{
-        return this.noteBookItemModel.findByIdAndUpdate(
-            id, 
-            dto, 
+        const updatedItem = await this.noteBookItemModel.findOneAndUpdate(
+            { _id: id, isDeleted: { $ne: true } },
+            dto,
             {new: true}
         );
+
+        if (!updatedItem) throw new NotFoundException("Notebook item not found");
+
+        return updatedItem;
     }
 
     async delete(id: string): Promise<any>{
-        return this.noteBookItemModel.findByIdAndDelete(id);
+        const deletedItem = await this.noteBookItemModel.findOneAndUpdate(
+            { _id: id, isDeleted: { $ne: true } },
+            { $set: { isDeleted: true, deletedAt: new Date() } },
+            { new: true },
+        );
+
+        if (!deletedItem) throw new NotFoundException("Notebook item not found");
+
+        return deletedItem;
     }
 
     async getItemByNotebookId (notebookId: string):Promise<NotebookItem[]>{
-        return this.noteBookItemModel.find({notebook_id: notebookId});
+        const notebook = await this.notebookModel.findOne({ _id: notebookId, isDeleted: { $ne: true } });
+        if (!notebook) throw new NotFoundException("Notebook not found");
+
+        return this.noteBookItemModel.find({notebook_id: notebookId, isDeleted: { $ne: true }});
     }
 
 }

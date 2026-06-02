@@ -8,6 +8,7 @@ import { JlptKanji } from "./schemas/jlpt_kanji.schema";
 import { Model } from "mongoose";
 import { InjectModel } from "@nestjs/mongoose";
 import { CreateJlptKanjiDto } from "./dto/create-jlpt-kanji.dto";
+import { KanjiStroke } from "../pdf/schemas/kanji-stroke.schema";
 import { plainToInstance } from "class-transformer";
 import { validate } from "class-validator";
 import {
@@ -50,7 +51,8 @@ function flattenValidationErrors(errors: any[]): string {
 @Injectable()
 export class JlptKanjiService {
   constructor(
-    @InjectModel(JlptKanji.name) private jlptKanjiModel: Model<JlptKanji>
+    @InjectModel(JlptKanji.name) private jlptKanjiModel: Model<JlptKanji>,
+    @InjectModel(KanjiStroke.name) private kanjiStrokeModel: Model<KanjiStroke>
   ) {}
 
   async createJlptKanji(data: CreateJlptKanjiDto): Promise<JlptKanji> {
@@ -81,7 +83,24 @@ export class JlptKanjiService {
       throw new NotFoundException("This word does not exist");
     }
 
-    return this.normalizeKanjiDocument(result);
+    const stroke = await this.kanjiStrokeModel
+      .findOne(
+        { char: result.kanji },
+        { char: 1, hexCode: 1, svgContent: 1, strokeCount: 1 }
+      )
+      .lean();
+
+    return {
+      ...this.normalizeKanjiDocument(result),
+      stroke: stroke
+        ? {
+            char: stroke.char,
+            hexCode: stroke.hexCode,
+            svgContent: stroke.svgContent,
+            strokeCount: stroke.strokeCount,
+          }
+        : null,
+    };
   }
 
   async searchJlptKanji(q = "", limit = 20) {
