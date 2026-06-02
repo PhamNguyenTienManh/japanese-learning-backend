@@ -4,10 +4,13 @@ import {
   OnModuleDestroy,
   OnModuleInit,
 } from "@nestjs/common";
+import { InjectModel } from "@nestjs/mongoose";
 import * as fs from "fs-extra";
 import * as Handlebars from "handlebars";
+import { Model } from "mongoose";
 import * as path from "path";
 import * as puppeteer from "puppeteer";
+import { KanjiStroke } from "./schemas/kanji-stroke.schema";
 
 @Injectable()
 export class PdfService implements OnModuleInit, OnModuleDestroy {
@@ -18,7 +21,10 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
   private browser!: puppeteer.Browser;
   private fontBase64!: string;
 
-  constructor() {}
+  constructor(
+    @InjectModel(KanjiStroke.name)
+    private readonly kanjiStrokeModel: Model<KanjiStroke>
+  ) {}
 
   async onModuleInit() {
     // Khởi động browser 1 lần duy nhất
@@ -44,12 +50,6 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
     this.logger.log("Puppeteer browser closed");
   }
 
-  private charToHexFileName(char: string): string {
-    const code = char.codePointAt(0);
-    if (!code) return "";
-    return code.toString(16).padStart(5, "0");
-  }
-
   private async loadTemplate(name: string) {
     if (this.templatesCache.has(name)) return this.templatesCache.get(name);
     const file = path.join(
@@ -61,31 +61,6 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
     const tpl = Handlebars.compile(content);
     this.templatesCache.set(name, tpl);
     return tpl;
-  }
-
-  private async loadStrokeSvgForChar(char: string) {
-    const hex = this.charToHexFileName(char);
-    if (!hex) return null;
-
-    // Trả về cache nếu đã load rồi
-    if (this.svgCache.has(hex)) return this.svgCache.get(hex);
-
-    const candidates = [
-      path.join(process.cwd(), "assets", "kanjivg", `${hex}.svg`),
-      path.join(process.cwd(), "assets", "kanjivg", `${hex.toUpperCase()}.svg`),
-    ];
-
-    for (const p of candidates) {
-      if (await fs.pathExists(p)) {
-        let svg = await fs.readFile(p, "utf8");
-        svg = svg.replace(/<\?xml.*?\?>\s*/g, "");
-        this.svgCache.set(hex, svg);
-        return svg;
-      }
-    }
-
-    this.svgCache.set(hex, null);
-    return null;
   }
 
   private parseStrokeSteps(svgContent: string | null, char: string): string[] {
@@ -131,6 +106,24 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  private limitMeaningsForPdf(meanings: string) {
+    return String(meanings || "")
+      .split(",")
+      .map((meaning) => meaning.trim())
+      .filter(Boolean)
+      .slice(0, 2)
+      .join(", ");
+  }
+
+  private limitReadingsForPdf(readings: string) {
+    return String(readings || "")
+      .split(/[,、\s]+/)
+      .map((reading) => reading.trim())
+      .filter(Boolean)
+      .slice(0, 2)
+      .join(", ");
+  }
+
   async generateJlptPdfFromWords(
     words: { word: string; phonetic: string; meanings: string }[]
   ) {
@@ -141,24 +134,40 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
       return this.pdfCache.get(cacheKey)!;
     }
 
-    const enriched = await Promise.all(
-      words.map(async (w) => {
-        const firstChar = w.word?.[0] || w.word;
-        const strokeSvg = await this.loadStrokeSvgForChar(firstChar);
-        const strokeSteps = this.parseStrokeSteps(strokeSvg, firstChar);
-        const practiceCount = Math.max(1, 20 - strokeSteps.length);
-        const practiceBoxes = Array(practiceCount).fill(null);
-
-        return {
-          word: w.word,
-          firstChar,
-          phonetic: w.phonetic,
-          meanings: w.meanings,
-          strokeSteps,
-          practiceBoxes,
-        };
-      })
+    const firstChars = words.map((w) => w.word?.[0] || w.word);
+    const charsToLoad = Array.from(
+      new Set(firstChars.filter((char) => char && !this.svgCache.has(char)))
     );
+
+    if (charsToLoad.length) {
+      const strokes = await this.kanjiStrokeModel
+        .find({ char: { $in: charsToLoad } }, { char: 1, svgContent: 1 })
+        .lean();
+      const strokeMap = new Map(
+        strokes.map((stroke) => [stroke.char, stroke.svgContent ?? null])
+      );
+
+      for (const char of charsToLoad) {
+        this.svgCache.set(char, strokeMap.get(char) ?? null);
+      }
+    }
+
+    const enriched = words.map((w, index) => {
+      const firstChar = firstChars[index];
+      const strokeSvg = firstChar ? this.svgCache.get(firstChar) ?? null : null;
+      const strokeSteps = this.parseStrokeSteps(strokeSvg, firstChar);
+      const practiceCount = Math.max(1, 20 - strokeSteps.length);
+      const practiceBoxes = Array(practiceCount).fill(null);
+
+      return {
+        word: w.word,
+        firstChar,
+        phonetic: this.limitReadingsForPdf(w.phonetic),
+        meanings: this.limitMeaningsForPdf(w.meanings),
+        strokeSteps,
+        practiceBoxes,
+      };
+    });
 
     const tpl = await this.loadTemplate("jlpt-page");
     if (!tpl) {
@@ -173,7 +182,7 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
     try {
       // domcontentloaded thay networkidle0 — đủ dùng vì HTML đã inline SVG + font sẵn
       await page.setContent(html, { waitUntil: "domcontentloaded" });
-      await page.evaluate(() => document.fonts?.ready);
+      await page.evaluate(() => document.fonts.ready.then(() => true));
 
       const pdfBuffer = await page.pdf({
         format: "A4",
