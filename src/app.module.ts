@@ -46,6 +46,7 @@ import { StatisticModule } from "./modules/statistic/statistic.module";
 import { UserActivitiesModule } from "./modules/user_activities/user_activities.module";
 
 import { TranslateModule } from "./modules/translate/translate.module";
+import { OcrModule } from "./modules/ocr/ocr.module";
 
 import { PdfModule } from "./modules/pdf/pdf.module";
 import { KantanModule } from "./modules/kantan/kantan.module";
@@ -98,6 +99,7 @@ import { ConversationModule } from "./modules/conversation/conversation.module";
     StatisticModule,
     UserActivitiesModule,
     TranslateModule,
+    OcrModule,
     PdfModule,
     KantanModule,
     PaymentsModule,
