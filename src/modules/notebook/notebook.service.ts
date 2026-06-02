@@ -4,6 +4,7 @@ import { Model, Types } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
 import { CreateNotebookDto } from './dto/create-notebook.dto';
 import { UserActivitiesService } from '../user_activities/user_activities.service';
+import { NotebookItem } from '../notebook-item/schemas/notebook-item.schema';
 import {
     UserActivityTargetType,
     UserActivityType,
@@ -14,12 +15,14 @@ export class NotebookService {
     constructor(
         @InjectModel(Notebook.name)
         private readonly notebook: Model<Notebook>,
+        @InjectModel(NotebookItem.name)
+        private readonly notebookItem: Model<NotebookItem>,
         private readonly userActivitiesService: UserActivitiesService,
     ) { }
 
     async create(userId: string, dto: CreateNotebookDto): Promise<Notebook> {
         dto.user_id = userId;
-        const existed = await this.notebook.findOne({ name: dto.name })
+        const existed = await this.notebook.findOne({ name: dto.name, isDeleted: { $ne: true } })
         if (existed) throw new ConflictException("Name is duplicated");
         const notebook = new this.notebook(dto);
         const savedNotebook = await notebook.save();
@@ -37,10 +40,14 @@ export class NotebookService {
     }
 
     async update(id: string, dto: CreateNotebookDto): Promise<Notebook> {
-        const notebook = await this.notebook.findById(id);
+        const notebook = await this.notebook.findOne({ _id: id, isDeleted: { $ne: true } });
         if (notebook) {
             if (dto.name) {
-                const existed = await this.notebook.findOne({ name: dto.name })
+                const existed = await this.notebook.findOne({
+                    _id: { $ne: id },
+                    name: dto.name,
+                    isDeleted: { $ne: true },
+                })
                 if (existed) throw new ConflictException("Name is duplicated");
                 notebook.name = dto.name;
             } else if (dto.viewCount === true) {
@@ -54,31 +61,41 @@ export class NotebookService {
 
     async findByUserId(userId: string): Promise<Notebook[]> {
         if (!userId) throw new Error("userId is required");
-        const notebooks = await this.notebook.find({ user_id: userId }).exec();
+        const notebooks = await this.notebook.find({ user_id: userId, isDeleted: { $ne: true } }).exec();
         return notebooks;
     }
 
     async getAll(): Promise<Notebook[]> {
-        return this.notebook.find();
+        return this.notebook.find({ isDeleted: { $ne: true } });
     }
 
     async delete(id: string): Promise<Notebook> {
-        const deletedNotebook = await this.notebook.findByIdAndDelete(id).exec();
+        const deletedAt = new Date();
+        const deletedNotebook = await this.notebook.findOneAndUpdate(
+            { _id: id, isDeleted: { $ne: true } },
+            { $set: { isDeleted: true, deletedAt } },
+            { new: true },
+        ).exec();
 
         if (!deletedNotebook) {
             throw new NotFoundException(`Notebook với id ${id} không tồn tại`);
         }
 
+        await this.notebookItem.updateMany(
+            { notebook_id: id, isDeleted: { $ne: true } },
+            { $set: { isDeleted: true, deletedAt } },
+        ).exec();
+
         return deletedNotebook;
     }
 
     async getByUserId(userId: string): Promise<Notebook[]>{
-        return this.notebook.find({user_id: userId});
+        return this.notebook.find({user_id: userId, isDeleted: { $ne: true }});
     }
 
     async searchByUserId(userId: string, keyword: string): Promise<Notebook[]> {
         if (!userId) throw new Error("userId is required");
-        const filter: any = { user_id: userId };
+        const filter: any = { user_id: userId, isDeleted: { $ne: true } };
         if (keyword && keyword.trim()) {
             const escaped = keyword.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             filter.name = { $regex: escaped, $options: 'i' };

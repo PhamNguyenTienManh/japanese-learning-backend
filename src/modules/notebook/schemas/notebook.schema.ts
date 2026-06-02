@@ -14,6 +14,12 @@ export class Notebook extends Document {
 
   @Prop({ default: 0, min: 0 })
   viewCount: number; // tổng lượt xem từ người khác
+
+  @Prop({ type: Boolean, default: false })
+  isDeleted: boolean; // xóa mềm
+
+  @Prop({ type: Date, default: null })
+  deletedAt?: Date | null; // thời điểm xóa mềm
 }
 
 export const NotebookSchema = SchemaFactory.createForClass(Notebook);

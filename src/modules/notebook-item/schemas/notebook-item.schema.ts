@@ -28,6 +28,12 @@ export class NotebookItem extends Document {
 
   @Prop({ default: false })
   remember: boolean; // đánh dấu đã nhớ
+
+  @Prop({ type: Boolean, default: false })
+  isDeleted: boolean; // xóa mềm
+
+  @Prop({ type: Date, default: null })
+  deletedAt?: Date | null; // thời điểm xóa mềm
 }
 
 export const NotebookItemSchema = SchemaFactory.createForClass(NotebookItem);
