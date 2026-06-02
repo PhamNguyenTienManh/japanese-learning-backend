@@ -55,12 +55,19 @@
   .grid-cell::before {
     content: "";
     position: absolute;
-    inset: 0;
-    background-image:
-      linear-gradient(to right, transparent calc(50% - 0.35px), #ccc calc(50% - 0.35px), #ccc calc(50% + 0.35px), transparent calc(50% + 0.35px)),
-      linear-gradient(to bottom, transparent calc(50% - 0.35px), #ccc calc(50% - 0.35px), #ccc calc(50% + 0.35px), transparent calc(50% + 0.35px)),
-      linear-gradient(to bottom right, transparent calc(50% - 0.35px), #ccc calc(50% - 0.35px), #ccc calc(50% + 0.35px), transparent calc(50% + 0.35px)),
-      linear-gradient(to bottom left, transparent calc(50% - 0.35px), #ccc calc(50% - 0.35px), #ccc calc(50% + 0.35px), transparent calc(50% + 0.35px));
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    border-left: 1px solid #ddd;
+    pointer-events: none;
+  }
+  .grid-cell::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    border-top: 1px solid #ddd;
     pointer-events: none;
   }
   .grid-content {
@@ -95,10 +102,10 @@
   <div class="row">
     <div class="left-cell large-char">{{this.firstChar}}</div>
     <div class="grid-container">
-      {{#each this.strokeSteps}}
+      {{#each this.strokeSteps as |step|}}
         <div class="grid-cell stroke">
           <div class="grid-content">
-            {{{this}}}
+            {{{step}}}
           </div>
         </div>
       {{/each}}
