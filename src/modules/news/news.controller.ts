@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post } from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch, Post, Put, Req } from "@nestjs/common";
 import { NewsService } from "./news.service";
 import { CreateNewsDto } from "./dto/create-new.dto";
 import { News } from "./schemas/news.schema";
@@ -29,5 +29,21 @@ export class NewsController {
   @Public()
   async getAll(): Promise<News[]> {
     return this.newService.get();
+  }
+
+  @Get("me/engagement")
+  async getMyEngagement(@Req() req: any) {
+    return this.newService.getMyEngagement(req.user?.sub);
+  }
+
+  @Put(":id/favorite")
+  async toggleFavorite(@Param("id") id: string, @Req() req: any) {
+    return this.newService.toggleFavorite(id, req.user?.sub);
+  }
+
+  @Put(":id/view")
+  @Public()
+  async markViewed(@Param("id") id: string, @Req() req: any) {
+    return this.newService.markViewed(id, req.user?.sub);
   }
 }

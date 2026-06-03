@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { InjectModel } from "@nestjs/mongoose";
-import { Exam } from "./schemas/exams.schema";
+import { Exam, ExamStatus } from "./schemas/exams.schema";
 import { ExamPart } from "../exams_part/schema/exams_part.schema";
 import { Model, Types } from "mongoose";
 import { CreateExamDto } from "./dto/create-exam.dto";
@@ -111,7 +111,10 @@ export class ExamsService {
     const levels = ["N5", "N4", "N3", "N2", "N1"];
     const result = {};
     for (const lv of levels) {
-      const count = await this.examModel.countDocuments({ level: lv });
+      const count = await this.examModel.countDocuments({
+        level: lv,
+        status: ExamStatus.PUBLIC,
+      });
       result[lv] = count;
     }
     return result;

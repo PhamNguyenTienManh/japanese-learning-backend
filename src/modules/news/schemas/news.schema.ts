@@ -1,6 +1,5 @@
 import { Prop, Schema, SchemaFactory } from "@nestjs/mongoose";
-import { Document } from "mongoose";
-import { number } from "zod";
+import { Document, Types } from "mongoose";
 
 
 class SyncData{
@@ -57,8 +56,19 @@ export class News extends Document {
   @Prop({ type: Boolean, default: false })
   published: boolean; // trạng thái hiển thị bài
 
+  @Prop({ type: [{ type: Types.ObjectId, ref: "User" }], default: [] })
+  liked: Types.ObjectId[]; // người dùng đã yêu thích
+
+  @Prop({ type: [{ type: Types.ObjectId, ref: "User" }], default: [] })
+  viewedBy: Types.ObjectId[]; // người dùng đã xem
+
+  @Prop({ type: Number, default: 0, min: 0 })
+  viewCount: number; // tổng lượt xem
+
   @Prop({ type: Date, default: Date.now })
   dateField: Date; // ngày hiển thị bài
 }
 
 export const NewsSchema = SchemaFactory.createForClass(News);
+NewsSchema.index({ liked: 1 });
+NewsSchema.index({ viewedBy: 1 });
