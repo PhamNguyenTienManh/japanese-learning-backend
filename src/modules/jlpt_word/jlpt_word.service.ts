@@ -164,6 +164,7 @@ export class JlptWordService {
     level?: string
   ): Promise<{
     data: {
+      _id: any;
       word: string;
       phonetic: string;
       meanings: string;
@@ -190,6 +191,7 @@ export class JlptWordService {
       ]);
 
       const formattedData = data.map((item) => ({
+        _id: item._id,
         word: item.word,
         phonetic: (item.phonetic || []).join(" "),
         meanings: (item.meanings || []).map((m) => m.meaning).join(", "),

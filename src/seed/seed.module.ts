@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { JlptWordSeeder } from './jlpt-word.seed';
 import { JlptWordMaziiSeeder } from './jlpt-word-mazii.seed';
 import { JlptGrammarSeeder } from './jlpt-grammar.seed';
+import { JlptGrammarMaziiSeeder } from './jlpt-grammar-mazii.seed';
 import { MongooseModule } from '@nestjs/mongoose';
 import { JlptWord, JlptWordSchema } from '../modules/jlpt_word/schemas/jlpt_word.schema';
 import { JlptGrammar, JlptGrammarSchema } from '../modules/jlpt_grammar/schemas/jlpt_grammar.schema';
@@ -39,6 +40,7 @@ import { ExamQuestion, ExamQuestionSchema } from '../modules/exam_question/schem
     JlptWordSeeder,
     JlptWordMaziiSeeder,
     JlptGrammarSeeder,
+    JlptGrammarMaziiSeeder,
     JlptKanjiSeeder,
     JlptKanjiMaziiSeeder,
     KanjiContributionMaziiSeeder,
@@ -48,6 +50,7 @@ import { ExamQuestion, ExamQuestionSchema } from '../modules/exam_question/schem
     JlptWordSeeder,
     JlptWordMaziiSeeder,
     JlptGrammarSeeder,
+    JlptGrammarMaziiSeeder,
     JlptKanjiSeeder,
     JlptKanjiMaziiSeeder,
     KanjiContributionMaziiSeeder,

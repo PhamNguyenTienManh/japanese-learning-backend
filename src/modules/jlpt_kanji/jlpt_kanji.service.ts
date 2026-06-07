@@ -190,6 +190,7 @@ export class JlptKanjiService {
       ]);
 
       const formatted = data.map((k) => ({
+        _id: k._id,
         kanji: k.kanji,
         mean: k.mean,
         reading: `${k.kun || ""} ${k.on || ""}`.trim(),
