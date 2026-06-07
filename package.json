@@ -54,6 +54,7 @@
     "seed:word": "ts-node src/seed.ts word",
     "seed:word-mazii": "ts-node src/seed.ts word-mazii",
     "seed:grammar": "ts-node src/seed.ts grammar",
+    "seed:grammar-mazii": "ts-node src/seed.ts grammar-mazii",
     "seed:kanji": "ts-node src/seed.ts kanji",
     "seed:kanji-mazii": "ts-node src/seed.ts kanji-mazii",
     "seed:kanjivg": "ts-node src/scripts/seed-kanjivg.ts",
