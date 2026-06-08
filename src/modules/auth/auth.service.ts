@@ -18,6 +18,7 @@ import { CACHE_MANAGER } from "@nestjs/cache-manager";
 import { ForgotPasswordDto } from "./dto/forgor-password.dto";
 import type { Cache } from "cache-manager";
 import { VerifyOtpDto } from "./dto/verify-otp.dto";
+import { ChangePasswordDto } from "./dto/change-password.dto";
 import * as nodemailer from "nodemailer";
 import { VerifyRegisterOtpDto } from "./dto/verify-register-otp.dto";
 import { User } from "../users/schemas/user.schema";
@@ -280,6 +281,35 @@ export class AuthService {
 
     await this.cacheManager.del(`otp_${dto.email}`);
     return { message: "Đặt lại mật khẩu thành công" };
+  }
+
+  async changePassword(userId: string, dto: ChangePasswordDto) {
+    const user = await this.userModel.findById(userId).exec();
+
+    if (!user) {
+      throw new NotFoundException("Không tìm thấy người dùng");
+    }
+
+    if (user.provider === "google" || !user.passwordHash) {
+      throw new BadRequestException(
+        "Tài khoản của bạn đang liên kết qua Google, không thể đổi mật khẩu tại đây",
+      );
+    }
+
+    const isMatch = await bcrypt.compare(dto.currentPassword, user.passwordHash);
+    if (!isMatch) {
+      throw new UnauthorizedException("Mật khẩu hiện tại không đúng");
+    }
+
+    const isSamePassword = await bcrypt.compare(dto.newPassword, user.passwordHash);
+    if (isSamePassword) {
+      throw new BadRequestException("Mật khẩu mới không được trùng mật khẩu hiện tại");
+    }
+
+    user.passwordHash = await bcrypt.hash(dto.newPassword, 10);
+    await user.save();
+
+    return { message: "Đổi mật khẩu thành công" };
   }
 
   private async sendOtpEmail(to: string, otp: string) {
