@@ -12,6 +12,22 @@ import {
 import { Types } from 'mongoose';
 import { registerDecorator, ValidationOptions, ValidationArguments } from 'class-validator';
 
+function getAgeFromDate(value: any) {
+  const birthDate = new Date(value);
+  if (Number.isNaN(birthDate.getTime())) return null;
+
+  const today = new Date();
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const monthDiff = today.getMonth() - birthDate.getMonth();
+  const dayDiff = today.getDate() - birthDate.getDate();
+
+  if (monthDiff < 0 || (monthDiff === 0 && dayDiff < 0)) {
+    age -= 1;
+  }
+
+  return age;
+}
+
 // Custom validator: tuổi >= 3
 export function MinAge(age: number, validationOptions?: ValidationOptions) {
   return function (object: Object, propertyName: string) {
@@ -23,12 +39,8 @@ export function MinAge(age: number, validationOptions?: ValidationOptions) {
       validator: {
         validate(value: any, args: ValidationArguments) {
           if (!value) return true; // allow empty (optional)
-          const birthDate = new Date(value);
-          const today = new Date();
-          const ageDiff = today.getFullYear() - birthDate.getFullYear();
-          const monthDiff = today.getMonth() - birthDate.getMonth();
-          const dayDiff = today.getDate() - birthDate.getDate();
-          return ageDiff > age || (ageDiff === age && (monthDiff > 0 || (monthDiff === 0 && dayDiff >= 0)));
+          const currentAge = getAgeFromDate(value);
+          return currentAge !== null && currentAge >= age;
         },
         defaultMessage(args: ValidationArguments) {
           return `Birthday must be at least ${age} years old`;
@@ -38,10 +50,31 @@ export function MinAge(age: number, validationOptions?: ValidationOptions) {
   };
 }
 
+export function MaxAge(age: number, validationOptions?: ValidationOptions) {
+  return function (object: Object, propertyName: string) {
+    registerDecorator({
+      name: 'maxAge',
+      target: object.constructor,
+      propertyName: propertyName,
+      options: validationOptions,
+      validator: {
+        validate(value: any, args: ValidationArguments) {
+          if (!value) return true;
+          const currentAge = getAgeFromDate(value);
+          return currentAge !== null && currentAge <= age;
+        },
+        defaultMessage(args: ValidationArguments) {
+          return `Birthday must not be older than ${age} years old`;
+        },
+      },
+    });
+  };
+}
+
 export class UpdateProfileDto {
   @IsOptional()
   @IsString()
-  @MinLength(2, { message: 'Name must be at least 2 characters' })
+  @MinLength(3, { message: 'Name must be at least 3 characters' })
   name?: string;
 
   @IsOptional()
@@ -64,6 +97,7 @@ export class UpdateProfileDto {
   @IsOptional()
   @IsDateString()
   @MinAge(3, { message: 'You must be at least 3 years old' })
+  @MaxAge(150, { message: 'Birthday must not be older than 150 years old' })
   birthday?: Date;
 
   @IsOptional()

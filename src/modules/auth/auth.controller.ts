@@ -1,4 +1,4 @@
-import { Controller, Post, Body, HttpCode, HttpStatus, UseGuards, Req, Get, Res } from '@nestjs/common';
+import { Controller, Post, Body, HttpCode, HttpStatus, UseGuards, Req, Get, Res, Put } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { Public } from './public.decorator';
@@ -7,6 +7,7 @@ import { SignInDto } from './dto/signin.dto';
 import { ForgotPasswordDto } from './dto/forgor-password.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { VerifyRegisterOtpDto } from './dto/verify-register-otp.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { AuthGuard } from '@nestjs/passport';
 import {
   clearAuthCookie,
@@ -89,6 +90,11 @@ export class AuthController {
   @Get('me')
   async me(@Req() req) {
     return this.authService.getCurrentSession(req.user);
+  }
+
+  @Put('change-password')
+  async changePassword(@Req() req, @Body() dto: ChangePasswordDto) {
+    return this.authService.changePassword(req.user.sub, dto);
   }
 
   @Get('google')
