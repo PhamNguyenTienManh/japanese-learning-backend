@@ -234,6 +234,7 @@ export class LearningPathService implements OnModuleInit {
               ? learningPath.goal.types
               : [learningPath.goal?.type].filter(Boolean),
             currentWeek: learningPath.currentWeek,
+            generationSource: (learningPath as any).generationSource || 'fallback',
             createdAt: (learningPath as any).createdAt,
           }
         : null,
@@ -312,6 +313,7 @@ export class LearningPathService implements OnModuleInit {
       level: learningPath.level,
       goal: learningPath.goal,
       streakDays: learningPath.streakDays,
+      generationSource: learningPath.generationSource || 'fallback',
       weekProgress: {
         week: currentWeek,
         total,
@@ -450,7 +452,7 @@ export class LearningPathService implements OnModuleInit {
       ? dto.goal.focusSkills
       : this.getDefaultSkillsForGoalTypes(goalTypes);
     const totalWeeks = this.calculateTotalWeeks(dto.goal.examDate);
-    const weeklyPlans = this.buildGenericPlans(
+    const fallbackPlans = this.buildGenericPlans(
       dto.level,
       primaryGoalType,
       goalTypes,
@@ -458,6 +460,17 @@ export class LearningPathService implements OnModuleInit {
       totalWeeks,
       dto.goal.dailyMinutes,
     );
+    const aiPlans = await this.generateGenericPlansWithAi({
+      level: dto.level,
+      goalTypes,
+      dailyMinutes: dto.goal.dailyMinutes,
+      focusSkills,
+      totalWeeks,
+      fallbackPlans,
+    });
+    const weeklyPlans = aiPlans.length ? aiPlans : fallbackPlans;
+    const generationSource = aiPlans.length ? 'ai' : 'fallback';
+    const warnings = aiPlans.length ? [] : ['AI generation failed, used fallback plan'];
 
     const learningPath = await this.learningPathModel.findOneAndUpdate(
       { userId: new Types.ObjectId(userId) },
@@ -474,6 +487,7 @@ export class LearningPathService implements OnModuleInit {
         weeklyPlans,
         currentWeek: 1,
         streakDays: 0,
+        generationSource,
         lastActiveAt: undefined,
         lastReview: undefined,
       },
@@ -482,7 +496,7 @@ export class LearningPathService implements OnModuleInit {
 
     return {
       learningPath,
-      warnings: [],
+      warnings,
     };
   }
 
@@ -986,6 +1000,117 @@ Tra ve JSON {"suggestedLevel":"N5|N4|N3|N2|N1","reason":"..."}
     };
   }
 
+  private async generateGenericPlansWithAi(input: {
+    level: string;
+    goalTypes: GoalType[];
+    dailyMinutes: number;
+    focusSkills: SkillType[];
+    totalWeeks: number;
+    fallbackPlans: WeeklyPlan[];
+  }): Promise<WeeklyPlan[]> {
+    const prompt = `
+Tao lo trinh hoc tieng Nhat ca nhan hoa dang JSON.
+
+Thong tin nguoi hoc:
+- Trinh do: ${input.level}
+- Muc tieu: ${input.goalTypes.join(', ')}
+- Ky nang uu tien: ${input.focusSkills.join(', ')}
+- Thoi gian hoc: ${input.dailyMinutes} phut/ngay
+- So tuan: ${input.totalWeeks}
+
+Plan nen hien tai de tham khao:
+${JSON.stringify(input.fallbackPlans)}
+
+Yeu cau:
+- Chi dung cac skill trong danh sach ky nang uu tien.
+- Moi tuan nen co cac task tong quat theo skill, khong tao refId/refModel.
+- title viet tieng Viet ngan gon, tu nhien, co nhac level ${input.level} neu phu hop.
+- targetCount la so nguyen duong hop ly voi thoi gian hoc.
+- estimatedMinutes phai hop ly voi targetCount.
+- Tra ve dung JSON hop le, khong markdown, khong giai thich.
+
+Schema bat buoc:
+{
+  "weeklyPlans": [
+    {
+      "week": 1,
+      "items": [
+        { "skill": "vocab", "title": "Hoc 10 tu vung N5 theo chu de", "targetCount": 10, "order": 1, "estimatedMinutes": 20 }
+      ]
+    }
+  ]
+}`;
+
+    try {
+      const raw = await this.aiClient.generate(prompt);
+      const parsed = this.parseJson(raw);
+      return this.normalizeGenericWeeklyPlans(
+        parsed?.weeklyPlans,
+        input.fallbackPlans,
+        input.focusSkills,
+        input.dailyMinutes,
+      );
+    } catch (error) {
+      this.logger.warn(`AI generic learning path generation failed: ${error?.message ?? error}`);
+      return [];
+    }
+  }
+
+  private normalizeGenericWeeklyPlans(
+    plans: any,
+    fallbackPlans: WeeklyPlan[],
+    focusSkills: SkillType[],
+    dailyMinutes: number,
+  ): WeeklyPlan[] {
+    if (!Array.isArray(plans)) return [];
+
+    const allowedSkills = new Set(focusSkills);
+    const fallbackCounts = this.getGenericTaskCounts(dailyMinutes);
+    const normalizedPlans = fallbackPlans.map((fallbackPlan, weekIndex) => {
+      const aiPlan = plans.find((plan: any) => Number(plan?.week) === fallbackPlan.week) ?? plans[weekIndex];
+      const aiItems = Array.isArray(aiPlan?.items) ? aiPlan.items : [];
+      const normalizedItems = aiItems
+        .map((item: any) => {
+          const skill = item?.skill as SkillType;
+          if (!allowedSkills.has(skill)) return null;
+
+          const fallbackCount = fallbackCounts[skill] ?? 1;
+          const rawTargetCount = Number(item?.targetCount);
+          const targetCount = Number.isFinite(rawTargetCount)
+            ? Math.min(Math.max(Math.round(rawTargetCount), 1), fallbackCount * 2)
+            : fallbackCount;
+          const rawEstimatedMinutes = Number(item?.estimatedMinutes);
+          const estimatedMinutes = Number.isFinite(rawEstimatedMinutes) && rawEstimatedMinutes > 0
+            ? Math.min(Math.round(rawEstimatedMinutes), dailyMinutes * 7)
+            : this.getGenericEstimatedMinutes(skill, targetCount);
+          const title = String(item?.title || '').trim() || this.getGenericTaskTitle(skill, '', targetCount);
+
+          return {
+            skill,
+            title,
+            targetCount,
+            order: 0,
+            estimatedMinutes,
+          };
+        })
+        .filter(Boolean) as WeeklyItem[];
+
+      const uniqueItems = normalizedItems.filter(
+        (item, index, items) => items.findIndex((candidate) => candidate.skill === item.skill) === index,
+      );
+      const items = uniqueItems.length ? uniqueItems : fallbackPlan.items;
+
+      return {
+        week: fallbackPlan.week,
+        items: items.map((item, index) => ({
+          ...item,
+          order: index + 1,
+        })),
+      };
+    });
+
+    return normalizedPlans.some((plan) => plan.items.length > 0) ? normalizedPlans : [];
+  }
   private buildGenericPlans(
     level: string,
     goalType: GoalType,
@@ -1356,3 +1481,7 @@ Yeu cau:
     return [...items].sort(() => Math.random() - 0.5);
   }
 }
+
+
+
+

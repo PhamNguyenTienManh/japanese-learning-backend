@@ -1,4 +1,4 @@
-import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+﻿import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
 
 export type GoalType = 'jlpt_exam' | 'conversation' | 'vocabulary' | 'writing';
@@ -117,6 +117,9 @@ export class LearningPath {
   @Prop({ default: 0 })
   streakDays: number;
 
+  @Prop({ type: String, enum: ['ai', 'fallback'], default: 'fallback' })
+  generationSource: 'ai' | 'fallback';
+
   @Prop()
   lastActiveAt?: Date;
 
@@ -128,3 +131,4 @@ export type LearningPathDocument = LearningPath & Document;
 export const LearningPathSchema = SchemaFactory.createForClass(LearningPath);
 
 LearningPathSchema.index({ userId: 1, createdAt: -1 });
+
