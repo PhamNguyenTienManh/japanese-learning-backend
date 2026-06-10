@@ -24,6 +24,11 @@ export class LearningPathController {
     return this.learningPathService.getDashboard(req.user.sub);
   }
 
+  @Post('review')
+  reviewLearningPath(@Req() req: any) {
+    return this.learningPathService.reviewLearningPath(req.user.sub);
+  }
+
   @Get('jlpt-card-status')
   getJlptCardStatus(
     @Req() req: any,
