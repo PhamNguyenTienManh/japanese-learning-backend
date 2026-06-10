@@ -52,6 +52,8 @@ type AvailableItem = {
   title: string;
 };
 
+type ReviewSuggestionType = 'speed_up' | 'slow_down' | 'focus_skill' | 'add_review';
+
 const LEVELS: PlacementLevel[] = ['N5', 'N4', 'N3', 'N2', 'N1'];
 const PLACEMENT_LEVEL_REQUIREMENTS: Record<
   PlacementLevel,
@@ -327,6 +329,42 @@ export class LearningPathService implements OnModuleInit {
     };
   }
 
+  async reviewLearningPath(userId: string) {
+    if (!Types.ObjectId.isValid(userId)) {
+      throw new BadRequestException('Invalid user id');
+    }
+
+    const learningPath = await this.learningPathModel.findOne({
+      userId: new Types.ObjectId(userId),
+    });
+    if (!learningPath) {
+      throw new NotFoundException('Learning path not found');
+    }
+
+    const currentWeek = learningPath.currentWeek || 1;
+    const currentPlan =
+      learningPath.weeklyPlans?.find((plan) => plan.week === currentWeek) ??
+      learningPath.weeklyPlans?.[currentWeek - 1];
+    const enrichedWeekItems = await this.enrichWeeklyItems(
+      userId,
+      learningPath,
+      currentPlan?.items ?? [],
+    );
+    const stats = await this.buildReviewStats(userId, learningPath, enrichedWeekItems);
+    const review = await this.generateReviewWithAi(stats);
+
+    learningPath.lastReview = {
+      reviewedAt: new Date(),
+      assessment: review.assessment,
+      suggestions: review.suggestions,
+    };
+    await learningPath.save();
+
+    return {
+      lastReview: learningPath.lastReview,
+      stats,
+    };
+  }
   async completeItem(userId: string, body: any) {
     if (!Types.ObjectId.isValid(userId)) {
       throw new BadRequestException('Invalid user id');
@@ -1000,6 +1038,214 @@ Tra ve JSON {"suggestedLevel":"N5|N4|N3|N2|N1","reason":"..."}
     };
   }
 
+  private async buildReviewStats(
+    userId: string,
+    learningPath: LearningPathDocument,
+    enrichedWeekItems: any[],
+  ) {
+    const completedItems = enrichedWeekItems.filter((item) => item.progress?.isComplete).length;
+    const totalItems = enrichedWeekItems.length;
+    const createdAt = new Date((learningPath as any).createdAt);
+    const daysElapsed = Number.isNaN(createdAt.getTime())
+      ? 0
+      : Math.max(0, Math.floor((Date.now() - createdAt.getTime()) / (24 * 60 * 60 * 1000)));
+
+    const skillStats = enrichedWeekItems.reduce((acc, item) => {
+      const skill = item.skill as SkillType;
+      const progress = item.progress || {};
+      const target = Number(progress.target ?? item.targetCount) || 1;
+      const count = Number(progress.count) || 0;
+      const current = acc[skill] ?? {
+        totalTarget: 0,
+        completedCount: 0,
+        taskCount: 0,
+        completedTasks: 0,
+        percent: 0,
+      };
+      current.totalTarget += target;
+      current.completedCount += Math.min(count, target);
+      current.taskCount += 1;
+      current.completedTasks += progress.isComplete ? 1 : 0;
+      current.percent = current.totalTarget
+        ? Math.round((current.completedCount / current.totalTarget) * 100)
+        : 0;
+      acc[skill] = current;
+      return acc;
+    }, {} as Record<string, any>);
+
+    return {
+      level: learningPath.level,
+      goal: learningPath.goal,
+      currentWeek: learningPath.currentWeek || 1,
+      daysElapsed,
+      streakDays: learningPath.streakDays || 0,
+      generationSource: learningPath.generationSource || 'fallback',
+      completionRate: totalItems ? Math.round((completedItems / totalItems) * 100) : 0,
+      completedItems,
+      totalItems,
+      skillStats,
+      examStats: await this.getRecentExamReviewStats(userId, learningPath),
+    };
+  }
+
+  private async getRecentExamReviewStats(
+    userId: string,
+    learningPath: LearningPathDocument,
+  ) {
+    const goalTypes = learningPath.goal?.types?.length
+      ? learningPath.goal.types
+      : [learningPath.goal?.type].filter(Boolean);
+    if (!goalTypes.includes('jlpt_exam')) return null;
+
+    const examIds = await this.examModel
+      .find({ level: learningPath.level }, { _id: 1 })
+      .lean()
+      .exec();
+    const examObjectIds = examIds.map((exam: any) => exam._id);
+    if (!examObjectIds.length) {
+      return { attemptCount: 0, latestScore: null, bestScore: null, averageScore: null };
+    }
+
+    const results = await this.examResultModel
+      .find({
+        userId: new Types.ObjectId(userId),
+        examId: { $in: examObjectIds },
+        status: ExamResultStatus.COMPLETED,
+      })
+      .sort({ end_time: -1, createdAt: -1 })
+      .limit(10)
+      .lean()
+      .exec();
+
+    if (!results.length) {
+      return { attemptCount: 0, latestScore: null, bestScore: null, averageScore: null };
+    }
+
+    const scores = results.map((result: any) => Number(result.total_score) || 0);
+    return {
+      attemptCount: results.length,
+      latestScore: scores[0],
+      bestScore: Math.max(...scores),
+      averageScore: Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length),
+    };
+  }
+
+  private async generateReviewWithAi(stats: any): Promise<{
+    assessment: string;
+    suggestions: { type: ReviewSuggestionType; skill?: SkillType; reason: string }[];
+  }> {
+    const fallbackReview = this.buildFallbackReview(stats);
+    const prompt = `
+Bạn là cố vấn học tiếng Nhật. Hãy đánh giá lộ trình học hiện tại dựa trên thống kê sau:
+${JSON.stringify(stats)}
+
+Yêu cầu:
+- Viết assessment bằng tiếng Việt, ngắn gọn, thực tế.
+- Đề xuất tối đa 3 suggestions.
+- Chỉ dùng type: speed_up, slow_down, focus_skill, add_review.
+- skill chỉ dùng khi type = focus_skill hoặc add_review và phải nằm trong các skill hiện có.
+- Chỉ trả JSON hợp lệ, không markdown.
+
+Schema:
+{
+  "assessment": "...",
+  "suggestions": [
+    { "type": "focus_skill", "skill": "grammar", "reason": "..." }
+  ]
+}`;
+
+    try {
+      const raw = await this.aiClient.generate(prompt);
+      const parsed = this.parseJson(raw);
+      const assessment = String(parsed?.assessment || '').trim() || fallbackReview.assessment;
+      const suggestions = Array.isArray(parsed?.suggestions)
+        ? parsed.suggestions
+            .map((suggestion: any) => this.normalizeReviewSuggestion(suggestion))
+            .filter(Boolean)
+            .slice(0, 3)
+        : [];
+
+      return {
+        assessment,
+        suggestions: suggestions.length ? suggestions : fallbackReview.suggestions,
+      };
+    } catch (error) {
+      this.logger.warn(`AI learning path review failed: ${error?.message ?? error}`);
+      return fallbackReview;
+    }
+  }
+
+  private normalizeReviewSuggestion(suggestion: any) {
+    const allowedTypes: ReviewSuggestionType[] = ['speed_up', 'slow_down', 'focus_skill', 'add_review'];
+    const allowedSkills = new Set<SkillType>([
+      'vocab',
+      'grammar',
+      'kanji',
+      'reading',
+      'writing',
+      'conversation',
+      'jlpt_exam',
+    ]);
+    const type = suggestion?.type as ReviewSuggestionType;
+    if (!allowedTypes.includes(type)) return null;
+
+    const reason = String(suggestion?.reason || '').trim();
+    if (!reason) return null;
+
+    const skill = suggestion?.skill as SkillType | undefined;
+    return {
+      type,
+      ...(skill && allowedSkills.has(skill) ? { skill } : {}),
+      reason,
+    };
+  }
+
+  private buildFallbackReview(stats: any): {
+    assessment: string;
+    suggestions: { type: ReviewSuggestionType; skill?: SkillType; reason: string }[];
+  } {
+    const completionRate = Number(stats?.completionRate) || 0;
+    const weakestSkill = Object.entries(stats?.skillStats || {})
+      .sort(([, a]: any, [, b]: any) => (a.percent || 0) - (b.percent || 0))[0]?.[0] as SkillType | undefined;
+
+    if (completionRate >= 80) {
+      return {
+        assessment: `Bạn đang theo lộ trình rất tốt với ${completionRate}% nhiệm vụ tuần đã hoàn thành. Có thể tăng nhẹ nhịp học nếu vẫn còn đủ thời gian và năng lượng.`,
+        suggestions: [
+          {
+            type: 'speed_up',
+            reason: 'Tỷ lệ hoàn thành tuần hiện tại cao, phù hợp để tăng nhẹ khối lượng học.',
+          },
+        ],
+      };
+    }
+
+    if (completionRate < 40) {
+      return {
+        assessment: `Bạn mới hoàn thành ${completionRate}% nhiệm vụ tuần này. Nên giảm tải và ưu tiên các kỹ năng nền tảng trước.`,
+        suggestions: [
+          {
+            type: 'slow_down',
+            reason: 'Tỷ lệ hoàn thành còn thấp, cần giảm nhịp để duy trì đều đặn.',
+          },
+          ...(weakestSkill
+            ? [{ type: 'focus_skill' as ReviewSuggestionType, skill: weakestSkill, reason: 'Đây là kỹ năng có tiến độ thấp nhất trong tuần hiện tại.' }]
+            : []),
+        ],
+      };
+    }
+
+    return {
+      assessment: `Bạn đang hoàn thành ${completionRate}% nhiệm vụ tuần này. Tiến độ ổn, nên tiếp tục duy trì nhịp học hiện tại và bổ sung ôn tập ngắn.`,
+      suggestions: [
+        {
+          type: 'add_review',
+          ...(weakestSkill ? { skill: weakestSkill } : {}),
+          reason: 'Thêm một phiên ôn tập ngắn sẽ giúp củng cố các mục chưa hoàn thành.',
+        },
+      ],
+    };
+  }
   private async generateGenericPlansWithAi(input: {
     level: string;
     goalTypes: GoalType[];
