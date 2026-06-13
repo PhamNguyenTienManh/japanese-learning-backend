@@ -93,8 +93,14 @@ export class LastReview {
   @Prop({ required: true })
   assessment: string;
 
+  @Prop()
+  onTrack?: boolean;
+
   @Prop({ type: [ReviewSuggestion], default: [] })
   suggestions: ReviewSuggestion[];
+
+  @Prop({ type: [WeeklyItem], default: [] })
+  adjustedWeeklyItems?: WeeklyItem[];
 }
 
 @Schema({ timestamps: true })

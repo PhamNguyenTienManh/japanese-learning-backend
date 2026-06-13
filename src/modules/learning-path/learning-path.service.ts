@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  InternalServerErrorException,
   Logger,
   NotFoundException,
   OnModuleInit,
@@ -18,6 +19,7 @@ import { JlptGrammar } from '../jlpt_grammar/schemas/jlpt_grammar.schema';
 import { JlptKanji } from '../jlpt_kanji/schemas/jlpt_kanji.schema';
 import { JlptWord } from '../jlpt_word/schemas/jlpt_word.schema';
 import { PLACEMENT_QUESTIONS_DATA } from './data/placement-questions.data';
+import { ApplyReviewDto } from './dto/apply-review.dto';
 import { GenerateLearningPathDto } from './dto/generate-learning-path.dto';
 import { SubmitPlacementDto } from './dto/submit-placement.dto';
 import {
@@ -356,7 +358,9 @@ export class LearningPathService implements OnModuleInit {
     learningPath.lastReview = {
       reviewedAt: new Date(),
       assessment: review.assessment,
+      onTrack: review.onTrack,
       suggestions: review.suggestions,
+      adjustedWeeklyItems: review.adjustedWeeklyItems,
     };
     await learningPath.save();
 
@@ -365,6 +369,42 @@ export class LearningPathService implements OnModuleInit {
       stats,
     };
   }
+
+  async applyReview(userId: string, dto: ApplyReviewDto) {
+    if (!Types.ObjectId.isValid(userId)) {
+      throw new BadRequestException('Invalid user id');
+    }
+
+    const learningPath = await this.learningPathModel.findOne({
+      userId: new Types.ObjectId(userId),
+    });
+    if (!learningPath) {
+      throw new NotFoundException('Learning path not found');
+    }
+
+    const confirmedItems = this.normalizeAdjustedWeeklyItems(
+      dto.confirmedItems,
+      learningPath,
+    );
+    if (!confirmedItems.length) {
+      throw new BadRequestException('confirmedItems must include at least one valid item');
+    }
+
+    const nextWeek = Math.max(1, (learningPath.currentWeek || 1) + 1);
+    const targetWeek = Math.min(nextWeek, Math.max(nextWeek, learningPath.weeklyPlans.length));
+    let targetPlan = learningPath.weeklyPlans.find((plan) => plan.week === targetWeek);
+
+    if (!targetPlan) {
+      targetPlan = { week: targetWeek, items: [] } as WeeklyPlan;
+      learningPath.weeklyPlans.push(targetPlan);
+    }
+
+    targetPlan.items = confirmedItems;
+    await learningPath.save();
+
+    return this.getDashboard(userId);
+  }
+
   async completeItem(userId: string, body: any) {
     if (!Types.ObjectId.isValid(userId)) {
       throw new BadRequestException('Invalid user id');
@@ -1132,46 +1172,62 @@ Tra ve JSON {"suggestedLevel":"N5|N4|N3|N2|N1","reason":"..."}
 
   private async generateReviewWithAi(stats: any): Promise<{
     assessment: string;
+    onTrack: boolean;
     suggestions: { type: ReviewSuggestionType; skill?: SkillType; reason: string }[];
+    adjustedWeeklyItems: WeeklyItem[];
   }> {
-    const fallbackReview = this.buildFallbackReview(stats);
     const prompt = `
 Bạn là cố vấn học tiếng Nhật. Hãy đánh giá lộ trình học hiện tại dựa trên thống kê sau:
 ${JSON.stringify(stats)}
 
 Yêu cầu:
 - Viết assessment bằng tiếng Việt, ngắn gọn, thực tế.
+- onTrack là boolean cho biết người học có đang đúng tiến độ không.
 - Đề xuất tối đa 3 suggestions.
-- Chỉ dùng type: speed_up, slow_down, focus_skill, add_review.
+- Chỉ dùng suggestion type: speed_up, slow_down, focus_skill, add_review.
 - skill chỉ dùng khi type = focus_skill hoặc add_review và phải nằm trong các skill hiện có.
+- adjustedWeeklyItems là danh sách task đề xuất cho tuần tiếp theo, chỉ dùng skill trong goal.focusSkills.
+- Mỗi adjustedWeeklyItems item dùng dạng task tổng quát: skill, title, targetCount, estimatedMinutes.
+- Không tạo refId/refModel.
+- Phải có assessment không rỗng, ít nhất 1 suggestion hợp lệ và ít nhất 1 adjustedWeeklyItems hợp lệ.
 - Chỉ trả JSON hợp lệ, không markdown.
 
 Schema:
 {
   "assessment": "...",
+  "onTrack": true,
   "suggestions": [
     { "type": "focus_skill", "skill": "grammar", "reason": "..." }
+  ],
+  "adjustedWeeklyItems": [
+    { "skill": "grammar", "title": "Ôn 10 mẫu ngữ pháp trọng tâm", "targetCount": 10, "estimatedMinutes": 30 }
   ]
 }`;
 
     try {
       const raw = await this.aiClient.generate(prompt);
       const parsed = this.parseJson(raw);
-      const assessment = String(parsed?.assessment || '').trim() || fallbackReview.assessment;
+      const assessment = String(parsed?.assessment || '').trim();
+      const onTrack = parsed?.onTrack;
       const suggestions = Array.isArray(parsed?.suggestions)
         ? parsed.suggestions
             .map((suggestion: any) => this.normalizeReviewSuggestion(suggestion))
             .filter(Boolean)
             .slice(0, 3)
         : [];
+      const adjustedWeeklyItems = this.normalizeAdjustedWeeklyItems(
+        parsed?.adjustedWeeklyItems,
+        stats,
+      );
 
-      return {
-        assessment,
-        suggestions: suggestions.length ? suggestions : fallbackReview.suggestions,
-      };
+      if (!assessment || typeof onTrack !== 'boolean' || !suggestions.length || !adjustedWeeklyItems.length) {
+        throw new Error('AI review response is incomplete');
+      }
+
+      return { assessment, onTrack, suggestions, adjustedWeeklyItems };
     } catch (error) {
-      this.logger.warn(`AI learning path review failed: ${error?.message ?? error}`);
-      return fallbackReview;
+      this.logger.error(`AI learning path review failed: ${error?.message ?? error}`);
+      throw new InternalServerErrorException('Hệ thống AI đánh giá lộ trình đang gặp lỗi. Vui lòng thử lại sau.');
     }
   }
 
@@ -1200,52 +1256,50 @@ Schema:
     };
   }
 
-  private buildFallbackReview(stats: any): {
-    assessment: string;
-    suggestions: { type: ReviewSuggestionType; skill?: SkillType; reason: string }[];
-  } {
-    const completionRate = Number(stats?.completionRate) || 0;
-    const weakestSkill = Object.entries(stats?.skillStats || {})
-      .sort(([, a]: any, [, b]: any) => (a.percent || 0) - (b.percent || 0))[0]?.[0] as SkillType | undefined;
+  private normalizeAdjustedWeeklyItems(items: any, context: any): WeeklyItem[] {
+    if (!Array.isArray(items)) return [];
 
-    if (completionRate >= 80) {
-      return {
-        assessment: `Bạn đang theo lộ trình rất tốt với ${completionRate}% nhiệm vụ tuần đã hoàn thành. Có thể tăng nhẹ nhịp học nếu vẫn còn đủ thời gian và năng lượng.`,
-        suggestions: [
-          {
-            type: 'speed_up',
-            reason: 'Tỷ lệ hoàn thành tuần hiện tại cao, phù hợp để tăng nhẹ khối lượng học.',
-          },
-        ],
-      };
-    }
+    const focusSkills = context?.goal?.focusSkills?.length
+      ? context.goal.focusSkills
+      : ['vocab', 'grammar', 'kanji'];
+    const allowedSkills = new Set<SkillType>(focusSkills);
+    const dailyMinutes = Number(context?.goal?.dailyMinutes) || 30;
+    const weeklyMinuteLimit = dailyMinutes * 7;
+    const level = context?.level || '';
 
-    if (completionRate < 40) {
-      return {
-        assessment: `Bạn mới hoàn thành ${completionRate}% nhiệm vụ tuần này. Nên giảm tải và ưu tiên các kỹ năng nền tảng trước.`,
-        suggestions: [
-          {
-            type: 'slow_down',
-            reason: 'Tỷ lệ hoàn thành còn thấp, cần giảm nhịp để duy trì đều đặn.',
-          },
-          ...(weakestSkill
-            ? [{ type: 'focus_skill' as ReviewSuggestionType, skill: weakestSkill, reason: 'Đây là kỹ năng có tiến độ thấp nhất trong tuần hiện tại.' }]
-            : []),
-        ],
-      };
-    }
+    const normalizedItems = items
+      .map((item: any): WeeklyItem | null => {
+        const skill = item?.skill as SkillType;
+        if (!allowedSkills.has(skill)) return null;
 
-    return {
-      assessment: `Bạn đang hoàn thành ${completionRate}% nhiệm vụ tuần này. Tiến độ ổn, nên tiếp tục duy trì nhịp học hiện tại và bổ sung ôn tập ngắn.`,
-      suggestions: [
-        {
-          type: 'add_review',
-          ...(weakestSkill ? { skill: weakestSkill } : {}),
-          reason: 'Thêm một phiên ôn tập ngắn sẽ giúp củng cố các mục chưa hoàn thành.',
-        },
-      ],
-    };
+        const rawTargetCount = Number(item?.targetCount);
+        const targetCount = Number.isFinite(rawTargetCount)
+          ? Math.min(Math.max(Math.round(rawTargetCount), 1), 100)
+          : 1;
+        const rawEstimatedMinutes = Number(item?.estimatedMinutes);
+        const estimatedMinutes = Number.isFinite(rawEstimatedMinutes) && rawEstimatedMinutes > 0
+          ? Math.min(Math.round(rawEstimatedMinutes), weeklyMinuteLimit)
+          : this.getGenericEstimatedMinutes(skill, targetCount);
+        const title = String(item?.title || '').trim() || this.getGenericTaskTitle(skill, level, targetCount);
+
+        return {
+          skill,
+          title,
+          targetCount,
+          order: 0,
+          estimatedMinutes,
+        };
+      })
+      .filter((item): item is WeeklyItem => Boolean(item))
+      .slice(0, 7)
+      .map((item, index) => ({
+        ...item,
+        order: index + 1,
+      }));
+
+    return normalizedItems;
   }
+
   private async generateGenericPlansWithAi(input: {
     level: string;
     goalTypes: GoalType[];
