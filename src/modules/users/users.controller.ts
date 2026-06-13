@@ -2,6 +2,7 @@
 import { 
   Controller, 
   Get, 
+  Post,
   Patch, 
   Param, 
   Body,
@@ -9,7 +10,12 @@ import {
   HttpStatus
 } from '@nestjs/common';
 import { UsersService } from './users.service';
-import { UpdateStatusDto, UpdateRoleDto } from './dto/update-user.dto';
+import {
+  AdminCreateUserDto,
+  AdminUpdateUserDto,
+  UpdateStatusDto,
+  UpdateRoleDto,
+} from './dto/update-user.dto';
 import { Roles } from '../auth/roles.decorator';
 
 @Controller("users")
@@ -27,6 +33,23 @@ export class UsersController {
     
     }
 
+  @Post()
+  @Roles('admin')
+  async createInternalAccount(@Body() dto: AdminCreateUserDto) {
+    try {
+      const user = await this.usersService.createInternalAccount(dto);
+      return {
+        success: true,
+        message: 'Internal account created successfully',
+        data: user,
+      };
+    } catch (error) {
+      throw new HttpException(
+        error.message || 'Failed to create user',
+        error.status || HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
 
   @Get(':id')
   async findOne(@Param('id') id: string) {
@@ -42,6 +65,27 @@ export class UsersController {
     } catch (error) {
       throw new HttpException(
         error.message || 'Failed to fetch user',
+        error.status || HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+
+  @Patch(':id')
+  @Roles('admin')
+  async updateAdminUser(
+    @Param('id') id: string,
+    @Body() dto: AdminUpdateUserDto
+  ) {
+    try {
+      const user = await this.usersService.updateAdminUser(id, dto);
+      return {
+        success: true,
+        message: 'User updated successfully',
+        data: user,
+      };
+    } catch (error) {
+      throw new HttpException(
+        error.message || 'Failed to update user',
         error.status || HttpStatus.INTERNAL_SERVER_ERROR
       );
     }
@@ -74,6 +118,7 @@ export class UsersController {
   }
 
   @Patch(':id/role')
+  @Roles("admin")
   async updateRole(
     @Param('id') id: string,
     @Body() updateRoleDto: UpdateRoleDto
