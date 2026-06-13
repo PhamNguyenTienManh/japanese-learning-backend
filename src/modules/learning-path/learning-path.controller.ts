@@ -1,4 +1,5 @@
 import { Body, Controller, DefaultValuePipe, Get, ParseIntPipe, Patch, Post, Query, Req } from '@nestjs/common';
+import { ApplyReviewDto } from './dto/apply-review.dto';
 import { GenerateLearningPathDto } from './dto/generate-learning-path.dto';
 import { SubmitPlacementDto } from './dto/submit-placement.dto';
 import { LearningPathService } from './learning-path.service';
@@ -27,6 +28,11 @@ export class LearningPathController {
   @Post('review')
   reviewLearningPath(@Req() req: any) {
     return this.learningPathService.reviewLearningPath(req.user.sub);
+  }
+
+  @Patch('apply-review')
+  applyReview(@Req() req: any, @Body() dto: ApplyReviewDto) {
+    return this.learningPathService.applyReview(req.user.sub, dto);
   }
 
   @Get('jlpt-card-status')
