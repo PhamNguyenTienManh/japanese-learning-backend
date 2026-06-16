@@ -9,6 +9,8 @@ import {
   listUserNotebooksTool,
   getNotebookItemsTool,
   addGeneratedNotebookItems,
+  createNotebookWithGeneratedItems,
+  NotebookToolProgress,
 } from "../tools/notebookTools";
 import { NotebookService } from "src/modules/notebook/notebook.service";
 import { NotebookItemService } from "src/modules/notebook-item/notebook-item.service";
@@ -30,6 +32,7 @@ import { GoogleGenAIClient } from "../provider/googleGenAIClient";
 import { ToolInterface } from "@langchain/core/tools";
 import { NotebookAIService } from "../service/notebook-ai.service";
 import { AiLangfuseTracingService } from "../service/ai-langfuse-tracing.service";
+import { AiFastReplyService } from "../service/ai-fast-reply.service";
 
 export type ChatRole = "user" | "ai";
 
@@ -37,6 +40,74 @@ export interface ChatMessage {
   role: ChatRole;
   content: string;
   timestamp: Date;
+}
+
+const NOTEBOOK_INTENT_PATTERN =
+  /\b(sổ\s*tay|so\s*tay|notebook|thêm.+(?:sổ|notebook)|tạo.+(?:sổ|notebook)|xem.+(?:sổ|notebook)|liệt\s*kê.+(?:sổ|notebook))\b/i;
+
+class AsyncEventQueue<T> implements AsyncIterable<T> {
+  private items: T[] = [];
+  private waiters: Array<{
+    resolve: (value: IteratorResult<T>) => void;
+    reject: (reason?: unknown) => void;
+  }> = [];
+  private closed = false;
+  private error: unknown = null;
+
+  push(item: T) {
+    if (this.closed) return;
+
+    const waiter = this.waiters.shift();
+    if (waiter) {
+      waiter.resolve({ value: item, done: false });
+      return;
+    }
+
+    this.items.push(item);
+  }
+
+  fail(error: unknown) {
+    if (this.closed) return;
+
+    this.error = error;
+    this.closed = true;
+    while (this.waiters.length > 0) {
+      this.waiters.shift()?.reject(error);
+    }
+  }
+
+  close() {
+    if (this.closed) return;
+
+    this.closed = true;
+    while (this.waiters.length > 0) {
+      this.waiters.shift()?.resolve({ value: undefined as T, done: true });
+    }
+  }
+
+  next(): Promise<IteratorResult<T>> {
+    if (this.items.length > 0) {
+      return Promise.resolve({ value: this.items.shift() as T, done: false });
+    }
+
+    if (this.error) {
+      return Promise.reject(this.error);
+    }
+
+    if (this.closed) {
+      return Promise.resolve({ value: undefined as T, done: true });
+    }
+
+    return new Promise((resolve, reject) => {
+      this.waiters.push({ resolve, reject });
+    });
+  }
+
+  [Symbol.asyncIterator](): AsyncIterator<T> {
+    return {
+      next: () => this.next(),
+    };
+  }
 }
 
 @Injectable()
@@ -52,6 +123,7 @@ export class ChatAgent {
     private readonly notebookService: NotebookService,
     private readonly notebookItemService: NotebookItemService,
     private readonly aiLangfuseTracing: AiLangfuseTracingService,
+    private readonly aiFastReplyService: AiFastReplyService,
   ) {
     this.systemPrompt = this.loadSystemPrompt();
   }
@@ -95,7 +167,15 @@ export class ChatAgent {
             ? new HumanMessage(message.content)
             : new AIMessage(message.content),
         ),
-    );
+      );
+  }
+
+  public getFastReply(userMessage: string): string | null {
+    return this.aiFastReplyService.getReply(userMessage);
+  }
+
+  private shouldUseCachedDirectReply(userMessage: string) {
+    return !NOTEBOOK_INTENT_PATTERN.test(userMessage || "");
   }
 
   /**
@@ -103,7 +183,10 @@ export class ChatAgent {
    * Tạo lại mỗi request — rẻ, và tránh được vụ config không propagate
    * trong streamEvents của RunnableWithMessageHistory.
    */
-  private buildWithHistory(userId: string) {
+  private buildWithHistory(
+    userId: string,
+    onProgress?: (progress: NotebookToolProgress) => void,
+  ) {
     const tools: ToolInterface[] = [
       createNotebookTool(
         this.notebookAIService,
@@ -120,10 +203,14 @@ export class ChatAgent {
       searchNotebookByNameTool(
         this.notebookService,
         userId,
+        onProgress,
       ) as unknown as ToolInterface,
       addNotebookItemsTool(
         this.notebookAIService,
+        this.notebookService,
         this.notebookItemService,
+        userId,
+        onProgress,
       ) as unknown as ToolInterface,
       listUserNotebooksTool(
         this.notebookService,
@@ -212,12 +299,29 @@ export class ChatAgent {
       throw new Error("userId is required");
     }
 
-    const withHistory = this.buildWithHistory(userId);
-    await this.seedHistory(sessionId, contextMessages);
-
     // Ép userMessage thành string an toàn
     const safeInput =
       typeof userMessage === "string" ? userMessage : String(userMessage);
+
+    if (this.shouldUseCachedDirectReply(safeInput)) {
+      try {
+        return await this.googleGenAIClient.generateCachedChat({
+          systemPrompt: this.systemPrompt,
+          history: contextMessages.map((message) => ({
+            role: message.role,
+            content: message.content,
+          })),
+          userMessage: safeInput,
+        });
+      } catch (error: any) {
+        this.logger.warn(
+          `[ChatAgent] Cached direct reply failed, falling back to tool agent: ${error?.message || error}`,
+        );
+      }
+    }
+
+    const withHistory = this.buildWithHistory(userId);
+    await this.seedHistory(sessionId, contextMessages);
 
     const payload = { input: safeInput };
 
@@ -296,11 +400,35 @@ export class ChatAgent {
     if (!sessionId) throw new Error("sessionId is required");
     if (!userId) throw new Error("userId is required");
 
-    const withHistory = this.buildWithHistory(userId);
-    await this.seedHistory(sessionId, contextMessages);
-
     const safeInput =
       typeof userMessage === "string" ? userMessage : String(userMessage);
+
+    if (this.shouldUseCachedDirectReply(safeInput)) {
+      try {
+        for await (const text of this.googleGenAIClient.streamCachedChat({
+          systemPrompt: this.systemPrompt,
+          history: contextMessages.map((message) => ({
+            role: message.role,
+            content: message.content,
+          })),
+          userMessage: safeInput,
+        })) {
+          yield { kind: "token", text };
+        }
+        return;
+      } catch (error: any) {
+        this.logger.warn(
+          `[ChatAgent] Cached direct stream failed, falling back to tool agent: ${error?.message || error}`,
+        );
+      }
+    }
+
+    const queue = new AsyncEventQueue<StreamReplyEvent>();
+    const withHistory = this.buildWithHistory(userId, (progress) => {
+      queue.push({ kind: "progress", ...progress });
+    });
+    await this.seedHistory(sessionId, contextMessages);
+
     const payload = { input: safeInput };
     const config = {
       configurable: { sessionId },
@@ -319,51 +447,64 @@ export class ChatAgent {
       tags: ["ai-chat", "stream"],
     };
 
-    const eventStream = withHistory.streamEvents(payload, config);
+    void (async () => {
+      try {
+        const eventStream = withHistory.streamEvents(payload, config);
 
-    for await (const event of eventStream) {
-      if (signal?.aborted) return;
+        for await (const event of eventStream) {
+          if (signal?.aborted) return;
 
-      if (event.event === "on_chat_model_stream") {
-        const chunk: any = (event as any).data?.chunk;
-        const content = chunk?.content;
+          if (event.event === "on_chat_model_stream") {
+            const chunk: any = (event as any).data?.chunk;
+            const content = chunk?.content;
 
-        let text = "";
-        if (typeof content === "string") {
-          text = content;
-        } else if (Array.isArray(content)) {
-          text = content
-            .filter(
-              (c: any) => c?.type === "text" && typeof c?.text === "string",
-            )
-            .map((c: any) => c.text)
-            .join("");
-        }
+            let text = "";
+            if (typeof content === "string") {
+              text = content;
+            } else if (Array.isArray(content)) {
+              text = content
+                .filter(
+                  (c: any) => c?.type === "text" && typeof c?.text === "string",
+                )
+                .map((c: any) => c.text)
+                .join("");
+            }
 
-        if (text) yield { kind: "token", text };
-      } else if (event.event === "on_tool_end") {
-        const toolName = (event as any).name as string;
-        const rawOutput = (event as any).data?.output;
+            if (text) queue.push({ kind: "token", text });
+          } else if (event.event === "on_tool_end") {
+            const toolName = (event as any).name as string;
+            const rawOutput = (event as any).data?.output;
 
-        // Tool có thể trả string (JSON.stringify) hoặc ToolMessage có content
-        let asText: string | undefined;
-        if (typeof rawOutput === "string") {
-          asText = rawOutput;
-        } else if (rawOutput && typeof rawOutput.content === "string") {
-          asText = rawOutput.content;
-        }
+            // Tool có thể trả string (JSON.stringify) hoặc ToolMessage có content
+            let asText: string | undefined;
+            if (typeof rawOutput === "string") {
+              asText = rawOutput;
+            } else if (rawOutput && typeof rawOutput.content === "string") {
+              asText = rawOutput.content;
+            }
 
-        let parsed: any = rawOutput;
-        if (asText) {
-          try {
-            parsed = JSON.parse(asText);
-          } catch {
-            parsed = asText;
+            let parsed: any = rawOutput;
+            if (asText) {
+              try {
+                parsed = JSON.parse(asText);
+              } catch {
+                parsed = asText;
+              }
+            }
+
+            queue.push({ kind: "tool", toolName, output: parsed });
           }
         }
-
-        yield { kind: "tool", toolName, output: parsed };
+      } catch (error) {
+        queue.fail(error);
+      } finally {
+        queue.close();
       }
+    })();
+
+    for await (const event of queue) {
+      if (signal?.aborted) return;
+      yield event;
     }
   }
 
@@ -394,8 +535,39 @@ export class ChatAgent {
       notebookName: notebook.name,
     };
   }
+
+  public async createNotebookFromAction(
+    userId: string,
+    name: string,
+    prompt: string,
+  ) {
+    if (!userId) throw new Error("userId is required");
+    if (!name) throw new Error("name is required");
+    if (!prompt) throw new Error("prompt is required");
+
+    const result = await createNotebookWithGeneratedItems(
+      this.notebookAIService,
+      this.notebookService,
+      this.notebookItemService,
+      userId,
+      name,
+      prompt,
+    );
+
+    return {
+      success: result.itemsCount > 0,
+      notebookId: result.notebook.id.toString(),
+      notebookName: name,
+      itemsCount: result.itemsCount,
+      requestedCount: result.requestedCount,
+      isComplete: result.itemsCount >= result.requestedCount,
+      isEmptyNotebook: result.itemsCount === 0,
+      message: `Đã tạo sổ tay "${name}" với ${result.itemsCount} mục`,
+    };
+  }
 }
 
 export type StreamReplyEvent =
   | { kind: "token"; text: string }
-  | { kind: "tool"; toolName: string; output: any };
+  | { kind: "tool"; toolName: string; output: any }
+  | ({ kind: "progress" } & NotebookToolProgress);

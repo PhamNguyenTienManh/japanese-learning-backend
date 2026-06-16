@@ -17,12 +17,14 @@ IMPORTANT:
 - No explanation, no markdown
 - Each item must have:
   - name (Japanese)
-  - notes (Vietnamese meaning)
-  - mean (English meaning)
+  - mean (Vietnamese meaning; concise dictionary meaning)
+  - notes (Vietnamese study note; extra usage nuance, context, or a short explanation that helps the learner understand better)
   - phonetic (hiragana/katakana)
+- Do NOT use English in mean. mean must be Vietnamese.
+- notes is only supplementary; do not put the primary meaning only in notes.
 
 Example:
-[{"name":"日","notes":"Mặt trời","mean":"Sun","phonetic":"ひ"}]
+[{"name":"日","mean":"mặt trời; ngày","notes":"Có thể đọc là にち/じつ trong từ ghép, hoặc ひ khi đứng riêng.","phonetic":"ひ"}]
 
 Generate now:
 `;

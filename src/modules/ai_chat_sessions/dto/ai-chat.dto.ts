@@ -25,3 +25,11 @@ export class ConfirmNotebookAddDto {
   @IsString()
   prompt: string;
 }
+
+export class ConfirmNotebookCreateDto {
+  @IsString()
+  name: string;
+
+  @IsString()
+  prompt: string;
+}

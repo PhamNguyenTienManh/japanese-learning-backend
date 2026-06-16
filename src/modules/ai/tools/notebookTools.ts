@@ -6,9 +6,21 @@ import { NotebookItemService } from "src/modules/notebook-item/notebook-item.ser
 import { NotebookAIService } from "../service/notebook-ai.service";
 
 const MAX_ADD_ITEM_ATTEMPTS = 3;
+export const MAX_NOTEBOOK_ITEMS_PER_ACTION = 30;
 const MAX_NOTEBOOK_CANDIDATES = 10;
 const MIN_CONFIRM_SCORE = 0.45;
 const MIN_SCORE_GAP = 0.15;
+
+export type NotebookToolProgress = {
+  stage: string;
+  message: string;
+  current?: number;
+  total?: number;
+};
+
+export type NotebookToolProgressCallback = (
+  progress: NotebookToolProgress,
+) => void;
 
 const NOTEBOOK_STOPWORDS = new Set([
   "so",
@@ -47,15 +59,117 @@ function normalizeItemName(name: string): string {
   return (name || "").trim().toLocaleLowerCase();
 }
 
-function parseRequestedCount(prompt: string): number | null {
-  const match = (prompt || "").match(
-    /(?:thêm|tạo|sinh|cho\s+tôi|generate|add)?\s*(\d{1,3})\s*(?:từ|từ\s+vựng|kanji|mục|items?|words?)?/i,
+function findRequestedCountMatch(prompt: string): RegExpMatchArray | null {
+  const text = prompt || "";
+
+  return (
+    text.match(
+      /\b(\d{1,3})\s*(?:từ\s+vựng|từ|kanji|mục|items?|words?)\b/i,
+    ) ||
+    text.match(
+      /\b(?:thêm|tạo|sinh|generate|add|make|create)\s+(\d{1,3})\b/i,
+    )
   );
+}
+
+function parseRequestedCount(prompt: string): number | null {
+  const match = findRequestedCountMatch(prompt);
   if (!match) return null;
 
   const count = Number(match[1]);
   if (!Number.isFinite(count) || count <= 0) return null;
-  return Math.min(count, 50);
+  return count;
+}
+
+function shouldGenerateItemsForNewNotebook(prompt: string): boolean {
+  return parseRequestedCount(prompt) !== null;
+}
+
+async function createEmptyNotebook(
+  notebookService: NotebookService,
+  userId: string,
+  notebookName: string,
+) {
+  return notebookService.create(userId, {
+    user_id: userId,
+    name: notebookName,
+  });
+}
+
+function buildLimitedPrompt(prompt: string, limit = MAX_NOTEBOOK_ITEMS_PER_ACTION): string {
+  const originalPrompt = (prompt || "").trim();
+  if (!originalPrompt) return `${limit} từ vựng`;
+
+  const countMatch = findRequestedCountMatch(originalPrompt);
+  if (countMatch?.[1]) {
+    return (
+      originalPrompt.slice(0, countMatch.index) +
+      countMatch[0].replace(countMatch[1], String(limit)) +
+      originalPrompt.slice((countMatch.index || 0) + countMatch[0].length)
+    );
+  }
+
+  return `${limit} từ vựng. ${originalPrompt}`;
+}
+
+function buildNotebookLimitConfirmation(input: {
+  prompt: string;
+  requestedCount: number;
+  notebookName?: string;
+}) {
+  const limitedCount = MAX_NOTEBOOK_ITEMS_PER_ACTION;
+  return {
+    success: true,
+    needsLimitConfirmation: true,
+    requestedCount: input.requestedCount,
+    limitedCount,
+    prompt: buildLimitedPrompt(input.prompt, limitedCount),
+    notebookName: input.notebookName,
+    message: `Một lần mình chỉ có thể tạo tối đa ${limitedCount} từ vựng. Bạn có muốn mình tạo ${limitedCount} từ vựng${input.notebookName ? ` cho sổ tay "${input.notebookName}"` : ""} không?`,
+  };
+}
+
+export async function createNotebookWithGeneratedItems(
+  notebookAIService: NotebookAIService,
+  notebookService: NotebookService,
+  notebookItemService: NotebookItemService,
+  userId: string,
+  notebookName: string,
+  prompt: string,
+) {
+  const requestedCount = parseRequestedCount(prompt);
+  const limitedPrompt =
+    requestedCount && requestedCount > MAX_NOTEBOOK_ITEMS_PER_ACTION
+      ? buildLimitedPrompt(prompt)
+      : prompt;
+
+  const notebook = await notebookService.create(userId, {
+    user_id: userId,
+    name: notebookName,
+  });
+
+  const items = await notebookAIService.generateNotebookItems(limitedPrompt);
+  const limitedItems = items.slice(0, MAX_NOTEBOOK_ITEMS_PER_ACTION);
+
+  for (const item of limitedItems) {
+    await notebookItemService.create(notebook.id.toString(), {
+      notebook_id: notebook.id.toString(),
+      name: item.name ?? "",
+      notes: item.notes ?? "",
+      mean: item.mean ?? "",
+      phonetic: item.phonetic ?? "",
+      type: "other",
+    });
+  }
+
+  return {
+    notebook,
+    itemsCount: limitedItems.length,
+    requestedCount:
+      requestedCount && requestedCount > MAX_NOTEBOOK_ITEMS_PER_ACTION
+        ? MAX_NOTEBOOK_ITEMS_PER_ACTION
+        : (requestedCount ?? limitedItems.length),
+  };
 }
 
 function buildSupplementPrompt(
@@ -149,6 +263,28 @@ function scoreNotebookName(keyword: string, notebookName: string): number {
   return Math.min(score, 1);
 }
 
+function isExactNotebookNameMatch(keyword: string, notebookName: string): boolean {
+  const normalizedKeyword = normalizeNotebookText(keyword);
+  const normalizedName = normalizeNotebookText(notebookName);
+
+  return !!normalizedKeyword && normalizedKeyword === normalizedName;
+}
+
+function buildNotebookConfirmationToken(
+  notebookId: string,
+  prompt: string,
+): string {
+  const source = `${notebookId}:${normalizeNotebookText(prompt)}`;
+  let hash = 2166136261;
+
+  for (let index = 0; index < source.length; index += 1) {
+    hash ^= source.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return (hash >>> 0).toString(36);
+}
+
 function resolveNotebookCandidates(notebooks: any[], keyword: string) {
   const scored = notebooks
     .map((nb) => ({
@@ -186,6 +322,7 @@ export async function addGeneratedNotebookItems(
   notebookItemService: NotebookItemService,
   notebookId: string,
   prompt: string,
+  onProgress?: NotebookToolProgressCallback,
 ) {
   if (!notebookId) throw new Error("notebookId is required");
   if (!prompt) throw new Error("prompt is required");
@@ -197,9 +334,28 @@ export async function addGeneratedNotebookItems(
     existingItems.map((item) => normalizeItemName(item.name)),
   );
   const requestedCount = parseRequestedCount(prompt);
+  const limitedPrompt =
+    requestedCount && requestedCount > MAX_NOTEBOOK_ITEMS_PER_ACTION
+      ? buildLimitedPrompt(prompt)
+      : prompt;
+  const requestedTargetCount = requestedCount
+    ? Math.min(requestedCount, MAX_NOTEBOOK_ITEMS_PER_ACTION)
+    : MAX_NOTEBOOK_ITEMS_PER_ACTION;
 
-  const firstBatch = await notebookAIService.generateNotebookItems(prompt);
-  const targetCount = requestedCount ?? firstBatch.length;
+  onProgress?.({
+    stage: "generate_notebook_items",
+    message: requestedCount
+      ? `Đang tạo ${requestedTargetCount} từ vựng mới...`
+      : "Đang tạo từ vựng mới...",
+    current: 0,
+    total: requestedCount ? requestedTargetCount : undefined,
+  });
+
+  const firstBatch = await notebookAIService.generateNotebookItems(limitedPrompt);
+  const targetCount = Math.min(
+    requestedCount ?? firstBatch.length,
+    MAX_NOTEBOOK_ITEMS_PER_ACTION,
+  );
 
   if (!firstBatch || firstBatch.length === 0 || targetCount <= 0) {
     throw new Error("Failed to generate items from prompt");
@@ -208,6 +364,12 @@ export async function addGeneratedNotebookItems(
   console.log(
     `Requested ${targetCount} new items. Existing notebook items: ${existingItems.length}`,
   );
+  onProgress?.({
+    stage: "filter_notebook_items",
+    message: `Đã tạo batch đầu tiên. Đang lọc từ trùng với ${existingItems.length} từ hiện có...`,
+    current: 0,
+    total: targetCount,
+  });
 
   const addedItems: string[] = [];
   const skippedItems: { name: string; reason: string }[] = [];
@@ -222,6 +384,13 @@ export async function addGeneratedNotebookItems(
   ) {
     const neededCount = targetCount - addedItems.length;
     if (attempt > 1) {
+      onProgress?.({
+        stage: "supplement_notebook_items",
+        message: `Một số từ bị trùng. Đang tạo bổ sung ${neededCount} từ mới...`,
+        current: addedItems.length,
+        total: targetCount,
+      });
+
       const excludedNames = Array.from(seenNames).filter(Boolean);
       const supplementPrompt = buildSupplementPrompt(
         prompt,
@@ -276,6 +445,20 @@ export async function addGeneratedNotebookItems(
         });
         addedItems.push(name);
         seenNames.add(normalizedName);
+        if (
+          addedItems.length === targetCount ||
+          addedItems.length % 10 === 0
+        ) {
+          onProgress?.({
+            stage: "save_notebook_items",
+            message:
+              addedItems.length >= targetCount
+                ? `Đã thêm đủ ${addedItems.length}/${targetCount} từ mới. Sắp hoàn thành...`
+                : `Đã thêm ${addedItems.length}/${targetCount} từ mới vào sổ tay...`,
+            current: addedItems.length,
+            total: targetCount,
+          });
+        }
       } catch (error: any) {
         const reason =
           error?.response?.message || error?.message || "Failed to save item";
@@ -287,6 +470,14 @@ export async function addGeneratedNotebookItems(
   }
 
   const isComplete = addedItems.length >= targetCount;
+  onProgress?.({
+    stage: "complete_notebook_items",
+    message: isComplete
+      ? `Hoàn tất thêm ${addedItems.length}/${targetCount} từ mới.`
+      : `Đã thêm ${addedItems.length}/${targetCount} từ mới, không sinh đủ mục không trùng.`,
+    current: addedItems.length,
+    total: targetCount,
+  });
 
   return {
     success: addedItems.length > 0,
@@ -324,41 +515,60 @@ export const createNotebookTool = (
 
     // Tạo tên notebook tự động
     const notebookName = `Notebook_GenAI_${new Date().toISOString().replace(/[:.]/g, "-")}`;
+    const requestedCount = parseRequestedCount(input.prompt);
 
-    console.log("Creating notebook:", notebookName);
+    if (!shouldGenerateItemsForNewNotebook(input.prompt)) {
+      const notebook = await createEmptyNotebook(
+        notebookService,
+        userId,
+        notebookName,
+      );
 
-    // Tạo notebook
-    const notebook = await notebookService.create(userId, {
-      user_id: userId,
-      name: notebookName,
-    });
+      console.log("Created empty notebook ID:", notebook.id);
+      console.log("================================");
 
-    console.log("Created notebook ID:", notebook.id);
-
-    // Sinh items từ prompt
-    const items = await notebookAIService.generateNotebookItems(input.prompt);
-
-    // Thêm items vào notebook
-    for (const item of items) {
-      await notebookItemService.create(notebook.id.toString(), {
-        notebook_id: notebook.id.toString(),
-        name: item.name ?? "",
-        notes: item.notes ?? "",
-        mean: item.mean ?? "",
-        phonetic: item.phonetic ?? "",
-        type: "other",
+      return JSON.stringify({
+        success: true,
+        notebookId: notebook.id.toString(),
+        notebookName,
+        itemsCount: 0,
+        requestedCount: 0,
+        isEmptyNotebook: true,
+        message: `Đã tạo sổ tay "${notebookName}". Bạn muốn thêm từ vựng gì vào sổ tay này?`,
       });
     }
 
-    console.log(`Added ${items.length} items`);
+    if (requestedCount && requestedCount > MAX_NOTEBOOK_ITEMS_PER_ACTION) {
+      return JSON.stringify(
+        buildNotebookLimitConfirmation({
+          prompt: input.prompt,
+          requestedCount,
+          notebookName,
+        }),
+      );
+    }
+
+    console.log("Creating notebook:", notebookName);
+
+    const { notebook, itemsCount } = await createNotebookWithGeneratedItems(
+      notebookAIService,
+      notebookService,
+      notebookItemService,
+      userId,
+      notebookName,
+      input.prompt,
+    );
+
+    console.log("Created notebook ID:", notebook.id);
+    console.log(`Added ${itemsCount} items`);
     console.log("================================");
 
     return JSON.stringify({
       success: true,
       notebookId: notebook.id.toString(),
       notebookName: notebookName,
-      itemsCount: items.length,
-      message: `Created notebook "${notebookName}" with ${items.length} items`,
+      itemsCount,
+      message: `Created notebook "${notebookName}" with ${itemsCount} items`,
     });
   };
 
@@ -376,6 +586,7 @@ export const createNotebookTool = (
 export const searchNotebookByNameTool = (
   notebookService: NotebookService,
   userId: string,
+  onProgress?: NotebookToolProgressCallback,
 ) => {
   const toolFunc = async (input: { keyword: string; addPrompt?: string }) => {
     console.log("=== SEARCH TOOL CALLED ===");
@@ -388,6 +599,10 @@ export const searchNotebookByNameTool = (
 
     console.log("Using userId:", userId);
     console.log("Searching for:", input.keyword);
+    onProgress?.({
+      stage: "search_notebook",
+      message: `Đang tìm sổ tay "${input.keyword}"...`,
+    });
 
     const notebooks = await notebookService.findByUserId(userId);
 
@@ -398,19 +613,67 @@ export const searchNotebookByNameTool = (
     });
 
     const resolved = resolveNotebookCandidates(notebooks, input.keyword);
+    const addPrompt = (input.addPrompt || "").trim();
+    const requestedCount = addPrompt ? parseRequestedCount(addPrompt) : null;
+    const exactNotebookMatch =
+      !!addPrompt &&
+      !!resolved.bestCandidate &&
+      resolved.needsConfirmation &&
+      isExactNotebookNameMatch(input.keyword, resolved.bestCandidate.name);
+    const needsAddLimitConfirmation =
+      exactNotebookMatch &&
+      !!requestedCount &&
+      requestedCount > MAX_NOTEBOOK_ITEMS_PER_ACTION;
+    const autoConfirmed = exactNotebookMatch && !needsAddLimitConfirmation;
+    const confirmationToken =
+      autoConfirmed && resolved.bestCandidate
+        ? buildNotebookConfirmationToken(resolved.bestCandidate.id, addPrompt)
+        : undefined;
 
     console.log("Matched results:", resolved.candidates.length);
     console.log("Best match:", resolved.bestCandidate);
     console.log("===================");
+    if (resolved.bestCandidate?.name && resolved.needsConfirmation) {
+      onProgress?.({
+        stage: "found_notebook",
+        message: `Đã tìm thấy sổ tay "${resolved.bestCandidate.name}".`,
+      });
+    } else if (resolved.noMatch) {
+      onProgress?.({
+        stage: "notebook_not_found",
+        message: "Chưa tìm thấy sổ tay khớp chính xác, đang chuẩn bị danh sách gợi ý...",
+      });
+    } else {
+      onProgress?.({
+        stage: "select_notebook",
+        message: "Có nhiều sổ tay gần giống nhau, đang chuẩn bị lựa chọn cho bạn...",
+      });
+    }
 
     return JSON.stringify({
       success: true,
       keyword: input.keyword,
-      addPrompt: input.addPrompt || "",
+      addPrompt,
       total: notebooks.length,
       ...resolved,
+      autoConfirmed,
+      exactNotebookMatch,
+      needsAddLimitConfirmation,
+      requestedCount: requestedCount || undefined,
+      limitedCount: needsAddLimitConfirmation
+        ? MAX_NOTEBOOK_ITEMS_PER_ACTION
+        : undefined,
+      limitedPrompt: needsAddLimitConfirmation
+        ? buildLimitedPrompt(addPrompt)
+        : undefined,
+      autoAddNotebookId: autoConfirmed ? resolved.bestCandidate?.id : undefined,
+      confirmationToken,
       message: resolved.needsConfirmation
-        ? `Found likely notebook "${resolved.bestCandidate?.name}"`
+        ? needsAddLimitConfirmation
+          ? `Exact notebook match "${resolved.bestCandidate?.name}" needs limit confirmation`
+          : autoConfirmed
+          ? `Exact notebook match "${resolved.bestCandidate?.name}" confirmed`
+          : `Found likely notebook "${resolved.bestCandidate?.name}"`
         : resolved.noMatch
           ? "No close notebook match found"
           : "Multiple possible notebooks found",
@@ -420,7 +683,7 @@ export const searchNotebookByNameTool = (
   return tool(toolFunc, {
     name: "search_notebook_by_name",
     description:
-      "Find existing notebook by name, including fuzzy Vietnamese matches. ALWAYS use this FIRST when user mentions adding to a specific notebook. When the user wants to add items, pass the full add request as addPrompt. Returns candidates and whether the UI must confirm/select before adding.",
+      "Find existing notebook by name, including fuzzy Vietnamese matches. ALWAYS use this FIRST when user mentions adding to a specific notebook or asks to inspect/count a named notebook. When the user wants to add items, pass the full add request as addPrompt. If the result has autoConfirmed=true, call add_notebook_items immediately with autoAddNotebookId and confirmationToken. Otherwise the UI will confirm/select before adding. For read-only inspect/count requests, do not pass addPrompt; if the result has needsConfirmation=true and bestCandidate.id, call get_notebook_items with that id instead of asking the user to confirm by text.",
     schema: z.object({
       keyword: z.string().describe("Notebook name to search"),
       addPrompt: z
@@ -434,25 +697,61 @@ export const searchNotebookByNameTool = (
 // ==================== TOOL 3: THÊM ITEMS VÀO NOTEBOOK CÓ SẴN ====================
 export const addNotebookItemsTool = (
   notebookAIService: NotebookAIService,
+  notebookService: NotebookService,
   notebookItemService: NotebookItemService,
+  userId: string,
+  onProgress?: NotebookToolProgressCallback,
 ) => {
-  const toolFunc = async (input: { notebookId: string; prompt: string }) => {
+  const toolFunc = async (input: {
+    notebookId: string;
+    prompt: string;
+    confirmationToken?: string;
+  }) => {
     console.log("=== ADD ITEMS TOOL CALLED ===");
     console.log("Input:", input);
 
-    const result = await addGeneratedNotebookItems(
-      notebookAIService,
-      notebookItemService,
+    const expectedToken = buildNotebookConfirmationToken(
       input.notebookId,
       input.prompt,
     );
 
-    console.log(
-      `Added ${result.itemsCount}/${result.requestedCount} requested items to notebook ${input.notebookId}`,
-    );
-    if (result.skippedItems.length > 0) {
-      console.log("Skipped items:", result.skippedItems);
+    if (input.confirmationToken === expectedToken) {
+      const notebooks = await notebookService.findByUserId(userId);
+      const notebook = notebooks.find(
+        (nb) => nb.id.toString() === input.notebookId,
+      );
+
+      if (!notebook) {
+        throw new Error("Notebook not found");
+      }
+
+      const result = await addGeneratedNotebookItems(
+        notebookAIService,
+        notebookItemService,
+        input.notebookId,
+        input.prompt,
+        onProgress,
+      );
+
+      console.log("Add confirmed by exact notebook match");
+      console.log("================================");
+
+      return JSON.stringify({
+        ...result,
+        notebookName: notebook.name,
+      });
     }
+
+    const result = {
+      success: false,
+      needsUserConfirmation: true,
+      notebookId: input.notebookId,
+      prompt: input.prompt,
+      message:
+        "Cần người dùng xác nhận trên giao diện trước khi thêm từ vào sổ tay.",
+    };
+
+    console.log("Add blocked until UI confirmation");
     console.log("================================");
 
     return JSON.stringify(result);
@@ -461,12 +760,16 @@ export const addNotebookItemsTool = (
   return tool(toolFunc, {
     name: "add_notebook_items",
     description:
-      "Add vocabulary/kanji items to an EXISTING notebook. Use this only after the user explicitly confirmed or selected the notebook.",
+      "Add vocabulary/kanji items to an EXISTING notebook only when search_notebook_by_name returned autoConfirmed=true and provided a confirmationToken for the exact same prompt. Without that token, this tool only reports that UI confirmation is required.",
     schema: z.object({
       notebookId: z
         .string()
         .describe("ID of the existing notebook from search result"),
       prompt: z.string().describe("What items to generate and add"),
+      confirmationToken: z
+        .string()
+        .optional()
+        .describe("Token from search_notebook_by_name when autoConfirmed=true"),
     }),
   });
 };
@@ -493,39 +796,58 @@ export const createNamedNotebookTool = (
 
     console.log("Using userId:", userId);
     console.log("Notebook name:", input.name);
+    const requestedCount = parseRequestedCount(input.prompt);
 
-    // Tạo notebook với tên do user/AI chọn
-    const notebook = await notebookService.create(userId, {
-      user_id: userId,
-      name: input.name,
-    });
+    if (!shouldGenerateItemsForNewNotebook(input.prompt)) {
+      const notebook = await createEmptyNotebook(
+        notebookService,
+        userId,
+        input.name,
+      );
 
-    console.log("Created notebook ID:", notebook.id);
+      console.log("Created empty notebook ID:", notebook.id);
+      console.log("================================");
 
-    // Sinh items từ prompt
-    const items = await notebookAIService.generateNotebookItems(input.prompt);
-
-    // Thêm items vào notebook
-    for (const item of items) {
-      await notebookItemService.create(notebook.id.toString(), {
-        notebook_id: notebook.id.toString(),
-        name: item.name ?? "",
-        notes: item.notes ?? "",
-        mean: item.mean ?? "",
-        phonetic: item.phonetic ?? "",
-        type: "other",
+      return JSON.stringify({
+        success: true,
+        notebookId: notebook.id.toString(),
+        notebookName: input.name,
+        itemsCount: 0,
+        requestedCount: 0,
+        isEmptyNotebook: true,
+        message: `Đã tạo sổ tay "${input.name}". Bạn muốn thêm từ vựng gì vào sổ tay này?`,
       });
     }
 
-    console.log(`Added ${items.length} items`);
+    if (requestedCount && requestedCount > MAX_NOTEBOOK_ITEMS_PER_ACTION) {
+      return JSON.stringify(
+        buildNotebookLimitConfirmation({
+          prompt: input.prompt,
+          requestedCount,
+          notebookName: input.name,
+        }),
+      );
+    }
+
+    const { notebook, itemsCount } = await createNotebookWithGeneratedItems(
+      notebookAIService,
+      notebookService,
+      notebookItemService,
+      userId,
+      input.name,
+      input.prompt,
+    );
+
+    console.log("Created notebook ID:", notebook.id);
+    console.log(`Added ${itemsCount} items`);
     console.log("================================");
 
     return JSON.stringify({
       success: true,
       notebookId: notebook.id.toString(),
       notebookName: input.name,
-      itemsCount: items.length,
-      message: `Đã tạo sổ tay "${input.name}" với ${items.length} mục`,
+      itemsCount,
+      message: `Đã tạo sổ tay "${input.name}" với ${itemsCount} mục`,
     });
   };
 
@@ -644,7 +966,7 @@ export const getNotebookItemsTool = (
   return tool(toolFunc, {
     name: "get_notebook_items",
     description:
-      'List all vocabulary/kanji items inside a specific notebook (by notebookId). Use when user asks "trong sổ X có gì", "liệt kê từ vựng trong sổ Y", "show items in notebook". Combine with search_notebook_by_name first if user only provides the name.',
+      'List all vocabulary/kanji items inside a specific notebook (by notebookId). Use when user asks "trong sổ X có gì", "sổ X có bao nhiêu từ", "liệt kê từ vựng trong sổ Y", "show items in notebook". Combine with search_notebook_by_name first if user only provides the name; when search returns a bestCandidate for a read-only request, call this tool directly.',
     schema: z.object({
       notebookId: z.string().describe("ID of the notebook to inspect"),
     }),
