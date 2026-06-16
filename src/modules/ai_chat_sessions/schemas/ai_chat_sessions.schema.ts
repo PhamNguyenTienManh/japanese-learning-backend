@@ -6,11 +6,18 @@ import { Document, Types } from 'mongoose';
 // (vd: nút "Xem sổ tay đã tạo" sau khi AI gọi tool tạo notebook)
 // ---------------------------
 export interface ChatMessageAction {
-  type: 'view_notebook' | 'confirm_add_to_notebook' | 'select_notebook_for_add';
+  type:
+    | 'view_notebook'
+    | 'confirm_add_to_notebook'
+    | 'select_notebook_for_add'
+    | 'confirm_add_limited_to_notebook'
+    | 'confirm_create_limited_notebook';
   label: string;
   notebookId?: string;
   notebookName?: string;
   prompt?: string;
+  requestedCount?: number;
+  limitedCount?: number;
   consumed?: boolean;
   candidates?: Array<{
     id: string;
