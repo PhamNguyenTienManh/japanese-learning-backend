@@ -3,6 +3,8 @@ import {
   IsDateString,
   IsIn,
   IsInt,
+  Max,
+  Min,
   IsOptional,
   ValidateNested,
 } from 'class-validator';
@@ -32,6 +34,12 @@ export class GenerateLearningGoalDto {
   @IsOptional()
   @IsDateString()
   examDate?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(180)
+  targetScore?: number;
 
   @IsInt()
   @IsIn([15, 30, 45, 60])
