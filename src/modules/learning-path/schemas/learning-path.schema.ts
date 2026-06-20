@@ -66,6 +66,9 @@ export class LearningGoal {
   @Prop()
   examDate?: Date;
 
+  @Prop()
+  targetScore?: number;
+
   @Prop({ required: true })
   dailyMinutes: number;
 
@@ -125,6 +128,9 @@ export class LearningPath {
 
   @Prop({ type: String, enum: ['ai', 'fallback'], default: 'fallback' })
   generationSource: 'ai' | 'fallback';
+
+  @Prop()
+  generatedAt?: Date;
 
   @Prop()
   lastActiveAt?: Date;

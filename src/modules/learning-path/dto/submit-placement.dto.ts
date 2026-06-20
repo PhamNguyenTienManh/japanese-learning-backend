@@ -6,7 +6,7 @@ export class PlacementAnswerDto {
   questionId: string;
 
   @IsInt()
-  @Min(0)
+  @Min(-1)
   @Max(3)
   selected: number;
 }

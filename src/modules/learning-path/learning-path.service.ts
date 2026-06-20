@@ -18,6 +18,8 @@ import { Exam, ExamStatus } from '../exams/schemas/exams.schema';
 import { JlptGrammar } from '../jlpt_grammar/schemas/jlpt_grammar.schema';
 import { JlptKanji } from '../jlpt_kanji/schemas/jlpt_kanji.schema';
 import { JlptWord } from '../jlpt_word/schemas/jlpt_word.schema';
+import { Profile } from '../profiles/schemas/profiles.schema';
+import { User } from '../users/schemas/user.schema';
 import { PLACEMENT_QUESTIONS_DATA } from './data/placement-questions.data';
 import { ApplyReviewDto } from './dto/apply-review.dto';
 import { GenerateLearningPathDto } from './dto/generate-learning-path.dto';
@@ -44,7 +46,15 @@ import {
   PlacementLevel,
   PlacementQuestion,
   PlacementQuestionDocument,
+  PlacementSkill,
 } from './schemas/placement-question.schema';
+import {
+  PlacementLevelCounts,
+  PlacementSkillCounts,
+  PlacementTestConfig,
+  PlacementTestConfigDocument,
+  PlacementTestSkillMatrix,
+} from './schemas/placement-test-config.schema';
 
 type AvailableItem = {
   id: string;
@@ -55,8 +65,19 @@ type AvailableItem = {
 };
 
 type ReviewSuggestionType = 'speed_up' | 'slow_down' | 'focus_skill' | 'add_review';
+type PlacementAvailability = {
+  total: number;
+  levelCounts: PlacementLevelCounts;
+  skillCounts: PlacementTestSkillMatrix;
+};
+type PlacementConfigValidation = {
+  isValid: boolean;
+  errors: string[];
+};
 
 const LEVELS: PlacementLevel[] = ['N5', 'N4', 'N3', 'N2', 'N1'];
+const PLACEMENT_SKILLS: PlacementSkill[] = ['vocab', 'grammar', 'listening'];
+const PLACEMENT_SECONDS_PER_QUESTION_OPTIONS = [30, 45, 60, 90, 120];
 const PLACEMENT_LEVEL_REQUIREMENTS: Record<
   PlacementLevel,
   Partial<Record<PlacementLevel, number>>
@@ -98,6 +119,8 @@ export class LearningPathService implements OnModuleInit {
     private readonly learningResourceProgressModel: Model<LearningResourceProgressDocument>,
     @InjectModel(PlacementQuestion.name)
     private readonly placementQuestionModel: Model<PlacementQuestionDocument>,
+    @InjectModel(PlacementTestConfig.name)
+    private readonly placementTestConfigModel: Model<PlacementTestConfigDocument>,
     @InjectModel(JlptWord.name)
     private readonly jlptWordModel: Model<JlptWord>,
     @InjectModel(JlptKanji.name)
@@ -110,6 +133,10 @@ export class LearningPathService implements OnModuleInit {
     private readonly examResultModel: Model<ExamResult>,
     @InjectModel(ConversationLesson.name)
     private readonly conversationLessonModel: Model<ConversationLesson>,
+    @InjectModel(User.name)
+    private readonly userModel: Model<User>,
+    @InjectModel(Profile.name)
+    private readonly profileModel: Model<Profile>,
     private readonly aiClient: GoogleGenAIClient,
   ) {}
 
@@ -122,36 +149,23 @@ export class LearningPathService implements OnModuleInit {
   }
 
   async getPlacementQuestions(count = 20) {
-    const safeCount = Math.min(Math.max(count, 10), 40);
-    const perLevel = Math.max(2, Math.floor(safeCount / LEVELS.length));
-    const selected: PlacementQuestionDocument[] = [];
-
-    for (const level of LEVELS) {
-      const vocab = await this.samplePlacementQuestions(level, 'vocab', Math.ceil(perLevel / 2));
-      const grammar = await this.samplePlacementQuestions(level, 'grammar', Math.floor(perLevel / 2));
-      selected.push(...vocab, ...grammar);
+    const savedConfig = await this.placementTestConfigModel
+      .findOne({ key: 'default', isActive: { $ne: false } })
+      .lean()
+      .exec();
+    if (savedConfig) {
+      try {
+        return await this.getConfiguredPlacementQuestions(savedConfig);
+      } catch (error) {
+        this.logger.warn(
+          `Placement config is invalid, using default fallback config: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
     }
 
-    if (selected.length < safeCount) {
-      const existingIds = selected.map((question) => question._id);
-      const extra = await this.placementQuestionModel
-        .aggregate([
-          { $match: { _id: { $nin: existingIds } } },
-          { $sample: { size: safeCount - selected.length } },
-        ])
-        .exec();
-      selected.push(...extra);
-    }
-
-    return this.shuffle(selected)
-      .slice(0, safeCount)
-      .map((question: any) => ({
-        id: question._id?.toString(),
-        content: question.content,
-        options: question.options,
-        level: question.level,
-        skill: question.skill,
-      }));
+    return this.getConfiguredPlacementQuestions(this.createDefaultPlacementTestConfig());
   }
 
   async submitPlacement(dto: SubmitPlacementDto) {
@@ -161,7 +175,7 @@ export class LearningPathService implements OnModuleInit {
 
     const questionIds = dto.answers.map((answer) => answer.questionId);
     const questions = await this.placementQuestionModel
-      .find({ _id: { $in: questionIds } })
+      .find({ _id: { $in: questionIds }, isActive: { $ne: false } })
       .lean()
       .exec();
 
@@ -173,7 +187,7 @@ export class LearningPathService implements OnModuleInit {
       dto.answers.map((answer) => [answer.questionId, answer.selected]),
     );
     const levelStats = this.createStatsMap(LEVELS);
-    const skillStats = this.createStatsMap(['vocab', 'grammar']);
+    const skillStats = this.createStatsMap(PLACEMENT_SKILLS);
 
     for (const question of questions) {
       const selected = answerByQuestionId.get(question._id.toString());
@@ -189,10 +203,9 @@ export class LearningPathService implements OnModuleInit {
     const levelBreakdown = Object.fromEntries(
       LEVELS.map((level) => [level, this.toPercent(levelStats[level])]),
     ) as Record<PlacementLevel, number>;
-    const skillBreakdown = {
-      vocab: this.toPercent(skillStats.vocab),
-      grammar: this.toPercent(skillStats.grammar),
-    };
+    const skillBreakdown = Object.fromEntries(
+      PLACEMENT_SKILLS.map((skill) => [skill, this.toPercent(skillStats[skill])]),
+    ) as Record<PlacementSkill, number>;
 
     const maxAllowedLevel = this.getMaxAllowedPlacementLevel(levelBreakdown);
     let suggestedLevel = this.suggestLevel(levelBreakdown);
@@ -223,7 +236,7 @@ export class LearningPathService implements OnModuleInit {
 
     const learningPath = await this.learningPathModel
       .findOne({ userId: new Types.ObjectId(userId) })
-      .select('_id level goal.type goal.types currentWeek createdAt')
+      .select('_id level goal.type goal.types currentWeek createdAt generatedAt')
       .lean()
       .exec();
 
@@ -240,6 +253,7 @@ export class LearningPathService implements OnModuleInit {
             currentWeek: learningPath.currentWeek,
             generationSource: (learningPath as any).generationSource || 'fallback',
             createdAt: (learningPath as any).createdAt,
+            generatedAt: (learningPath as any).generatedAt,
           }
         : null,
     };
@@ -293,23 +307,19 @@ export class LearningPathService implements OnModuleInit {
     const completed = enrichedWeekItems.filter((item) => item.progress?.isComplete).length;
     const total = enrichedWeekItems.length;
     const dailyMinutes = learningPath.goal?.dailyMinutes || 30;
-    const todayTasks: any[] = [];
-    let assignedMinutes = 0;
+    const todayTasks = await this.buildTodayTasks(
+      userId,
+      learningPath,
+      enrichedWeekItems,
+      dailyMinutes,
+    );
 
-    for (const item of enrichedWeekItems
-      .filter((item) => !item.progress?.isComplete)
-      .sort((a, b) => (a.order || 0) - (b.order || 0))) {
-      todayTasks.push(item);
-      assignedMinutes += item.estimatedMinutes || 15;
-      if (assignedMinutes >= dailyMinutes) break;
-    }
-
-    const createdAt = new Date((learningPath as any).createdAt);
-    const daysElapsed = Number.isNaN(createdAt.getTime())
+    const startedAt = this.getLearningPathStartAt(learningPath);
+    const daysElapsed = !startedAt
       ? 0
       : Math.max(
           0,
-          Math.floor((Date.now() - createdAt.getTime()) / (24 * 60 * 60 * 1000)),
+          Math.floor((Date.now() - startedAt.getTime()) / (24 * 60 * 60 * 1000)),
         );
 
     return {
@@ -403,6 +413,296 @@ export class LearningPathService implements OnModuleInit {
     await learningPath.save();
 
     return this.getDashboard(userId);
+  }
+
+  async adminListLearningPaths(query: any = {}) {
+    const page = Math.max(Number(query.page) || 1, 1);
+    const limit = Math.min(Math.max(Number(query.limit) || 20, 1), 100);
+    const filter: any = {};
+
+    if (query.level && LEVELS.includes(query.level)) {
+      filter.level = query.level;
+    }
+    if (['ai', 'fallback'].includes(query.generationSource)) {
+      filter.generationSource = query.generationSource;
+    }
+    if (query.userId && Types.ObjectId.isValid(query.userId)) {
+      filter.userId = new Types.ObjectId(query.userId);
+    }
+
+    const [rows, total] = await Promise.all([
+      this.learningPathModel
+        .find(filter)
+        .sort({ updatedAt: -1, createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean()
+        .exec(),
+      this.learningPathModel.countDocuments(filter),
+    ]);
+    const userMeta = await this.getUserMetaMap(rows.map((row: any) => row.userId));
+
+    return {
+      data: rows.map((row: any) => this.toAdminLearningPathSummary(row, userMeta)),
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(Math.ceil(total / limit), 1),
+      },
+    };
+  }
+
+  async adminGetLearningPath(id: string) {
+    const learningPath = await this.findLearningPathById(id);
+    const userMeta = await this.getUserMetaMap([learningPath.userId]);
+    const detail = this.toAdminLearningPathDetail(learningPath, userMeta);
+    return {
+      ...detail,
+      progressDetail: await this.buildAdminProgressDetail(learningPath),
+    };
+  }
+
+  async adminUpdateLearningPath(id: string, body: any) {
+    const learningPath = await this.findLearningPathById(id);
+
+    if (body.level && LEVELS.includes(body.level)) {
+      learningPath.level = body.level;
+    }
+    if (body.goal) {
+      const currentGoal = learningPath.goal || ({} as any);
+      const goalTypes = this.normalizeGoalTypes(
+        body.goal.types,
+        body.goal.type || currentGoal.type,
+      );
+      learningPath.goal = {
+        type: goalTypes[0],
+        types: goalTypes,
+        examDate: body.goal.examDate ? new Date(body.goal.examDate) : undefined,
+        targetScore: Number.isFinite(Number(body.goal.targetScore))
+          ? Math.min(Math.max(Math.round(Number(body.goal.targetScore)), 0), 180)
+          : currentGoal.targetScore,
+        dailyMinutes: Math.max(Number(body.goal.dailyMinutes) || currentGoal.dailyMinutes || 30, 5),
+        focusSkills: this.normalizeSkillList(
+          body.goal.focusSkills?.length ? body.goal.focusSkills : currentGoal.focusSkills,
+        ),
+      };
+    }
+    if (Number.isFinite(Number(body.currentWeek))) {
+      learningPath.currentWeek = Math.min(
+        Math.max(Math.round(Number(body.currentWeek)), 1),
+        Math.max(learningPath.weeklyPlans?.length || 1, 1),
+      );
+    }
+    if (Array.isArray(body.weeklyPlans)) {
+      learningPath.weeklyPlans = this.normalizeAdminWeeklyPlans(body.weeklyPlans);
+      learningPath.currentWeek = Math.min(
+        Math.max(learningPath.currentWeek || 1, 1),
+        Math.max(learningPath.weeklyPlans.length, 1),
+      );
+      learningPath.markModified('weeklyPlans');
+    }
+
+    await learningPath.save();
+    return this.adminGetLearningPath((learningPath as any)._id.toString());
+  }
+
+  async adminRunReview(id: string) {
+    const learningPath = await this.findLearningPathById(id);
+    return this.reviewLearningPath(learningPath.userId.toString());
+  }
+
+  async adminApplyReview(id: string, body: any) {
+    const learningPath = await this.findLearningPathById(id);
+    const confirmedItems = Array.isArray(body?.confirmedItems)
+      ? body.confirmedItems
+      : learningPath.lastReview?.adjustedWeeklyItems;
+    return this.applyReview(learningPath.userId.toString(), { confirmedItems } as ApplyReviewDto);
+  }
+
+  async adminDismissReview(id: string) {
+    const learningPath = await this.findLearningPathById(id);
+    if (learningPath.lastReview) {
+      learningPath.lastReview.adjustedWeeklyItems = [];
+      learningPath.markModified('lastReview');
+      await learningPath.save();
+    }
+    return this.adminGetLearningPath(id);
+  }
+
+  async adminListPlacementQuestions(query: any = {}) {
+    const page = Math.max(Number(query.page) || 1, 1);
+    const limit = Math.min(Math.max(Number(query.limit) || 20, 1), 100);
+    const filter: any = {};
+    const q = String(query.q || '').trim();
+
+    if (q) {
+      filter.$or = [
+        { content: { $regex: q, $options: 'i' } },
+        { explanation: { $regex: q, $options: 'i' } },
+        { tags: { $regex: q, $options: 'i' } },
+      ];
+    }
+    if (query.level && LEVELS.includes(query.level)) {
+      filter.level = query.level;
+    }
+    if (PLACEMENT_SKILLS.includes(query.skill)) {
+      filter.skill = query.skill;
+    }
+    if (query.isActive === 'true') filter.isActive = true;
+    if (query.isActive === 'false') filter.isActive = false;
+
+    const [rows, total] = await Promise.all([
+      this.placementQuestionModel
+        .find(filter)
+        .sort({ level: 1, skill: 1, updatedAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean()
+        .exec(),
+      this.placementQuestionModel.countDocuments(filter),
+    ]);
+
+    return {
+      data: rows.map((row: any) => this.toAdminPlacementQuestion(row)),
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(Math.ceil(total / limit), 1),
+      },
+    };
+  }
+
+  async adminCreatePlacementQuestion(body: any) {
+    const payload = this.normalizePlacementQuestionPayload(body);
+    const question = await this.placementQuestionModel.create(payload);
+    return this.toAdminPlacementQuestion(question.toObject());
+  }
+
+  async adminGetPlacementQuestion(id: string) {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException('Invalid placement question id');
+    }
+    const question = await this.placementQuestionModel.findById(id).lean().exec();
+    if (!question) {
+      throw new NotFoundException('Placement question not found');
+    }
+    return this.toAdminPlacementQuestion(question);
+  }
+
+  async adminUpdatePlacementQuestion(id: string, body: any) {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException('Invalid placement question id');
+    }
+    const payload = this.normalizePlacementQuestionPayload(body, true);
+    const question = await this.placementQuestionModel
+      .findByIdAndUpdate(id, payload, { new: true, runValidators: true })
+      .lean()
+      .exec();
+    if (!question) {
+      throw new NotFoundException('Placement question not found');
+    }
+    return this.toAdminPlacementQuestion(question);
+  }
+
+  async adminDeletePlacementQuestion(id: string) {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException('Invalid placement question id');
+    }
+    const result = await this.placementQuestionModel
+      .findByIdAndUpdate(id, { isActive: false }, { new: true, runValidators: true })
+      .lean()
+      .exec();
+    if (!result) {
+      throw new NotFoundException('Placement question not found');
+    }
+    return this.toAdminPlacementQuestion(result);
+  }
+
+  async adminGetPlacementTestConfig() {
+    const [config, availability] = await Promise.all([
+      this.placementTestConfigModel.findOne({ key: 'default' }).lean().exec(),
+      this.getPlacementAvailability(),
+    ]);
+    const normalizedConfig = config
+      ? this.toAdminPlacementTestConfig(config)
+      : this.createDefaultPlacementTestConfig();
+
+    return {
+      config: normalizedConfig,
+      availability,
+      validation: this.validatePlacementTestConfig(normalizedConfig, availability),
+    };
+  }
+
+  async adminUpdatePlacementTestConfig(body: any) {
+    const availability = await this.getPlacementAvailability();
+    const payload = this.normalizePlacementTestConfigPayload(body);
+    const validation = this.validatePlacementTestConfig(payload, availability);
+
+    if (!validation.isValid) {
+      throw new BadRequestException(validation.errors.join(' '));
+    }
+
+    const config = await this.placementTestConfigModel
+      .findOneAndUpdate(
+        { key: 'default' },
+        {
+          key: 'default',
+          totalQuestions: payload.totalQuestions,
+          levelCounts: payload.levelCounts,
+          skillCounts: payload.skillCounts,
+          secondsPerQuestion: payload.secondsPerQuestion,
+          isActive: payload.isActive,
+        },
+        { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true },
+      )
+      .lean()
+      .exec();
+
+    return {
+      config: this.toAdminPlacementTestConfig(config),
+      availability,
+      validation: this.validatePlacementTestConfig(config, availability),
+    };
+  }
+
+  async adminGetProgressOverview(query: any = {}) {
+    const page = Math.max(Number(query.page) || 1, 1);
+    const limit = Math.min(Math.max(Number(query.limit) || 20, 1), 100);
+    const filter: any = {};
+    if (query.level && LEVELS.includes(query.level)) {
+      filter.level = query.level;
+    }
+
+    const [rows, total] = await Promise.all([
+      this.learningPathModel
+        .find(filter)
+        .sort({ updatedAt: -1, createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean()
+        .exec(),
+      this.learningPathModel.countDocuments(filter),
+    ]);
+    const userMeta = await this.getUserMetaMap(rows.map((row: any) => row.userId));
+    const details = await Promise.all(
+      rows.map(async (row: any) => ({
+        ...this.toAdminLearningPathSummary(row, userMeta),
+        progressDetail: await this.buildAdminProgressDetail(row),
+      })),
+    );
+
+    return {
+      data: details,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(Math.ceil(total / limit), 1),
+      },
+    };
   }
 
   async completeItem(userId: string, body: any) {
@@ -530,6 +830,9 @@ export class LearningPathService implements OnModuleInit {
       ? dto.goal.focusSkills
       : this.getDefaultSkillsForGoalTypes(goalTypes);
     const totalWeeks = this.calculateTotalWeeks(dto.goal.examDate);
+    const targetScore = dto.goal.targetScore !== undefined
+      ? Math.min(Math.max(Math.round(Number(dto.goal.targetScore)), 0), 180)
+      : undefined;
     const fallbackPlans = this.buildGenericPlans(
       dto.level,
       primaryGoalType,
@@ -542,6 +845,7 @@ export class LearningPathService implements OnModuleInit {
       level: dto.level,
       goalTypes,
       dailyMinutes: dto.goal.dailyMinutes,
+      targetScore,
       focusSkills,
       totalWeeks,
       fallbackPlans,
@@ -549,25 +853,32 @@ export class LearningPathService implements OnModuleInit {
     const weeklyPlans = aiPlans.length ? aiPlans : fallbackPlans;
     const generationSource = aiPlans.length ? 'ai' : 'fallback';
     const warnings = aiPlans.length ? [] : ['AI generation failed, used fallback plan'];
+    const generatedAt = new Date();
 
     const learningPath = await this.learningPathModel.findOneAndUpdate(
       { userId: new Types.ObjectId(userId) },
       {
-        userId: new Types.ObjectId(userId),
-        level: dto.level,
-        goal: {
-          type: primaryGoalType,
-          types: goalTypes,
-          examDate: dto.goal.examDate ? new Date(dto.goal.examDate) : undefined,
-          dailyMinutes: dto.goal.dailyMinutes,
-          focusSkills,
+        $set: {
+          userId: new Types.ObjectId(userId),
+          level: dto.level,
+          goal: {
+            type: primaryGoalType,
+            types: goalTypes,
+            examDate: dto.goal.examDate ? new Date(dto.goal.examDate) : undefined,
+            targetScore,
+            dailyMinutes: dto.goal.dailyMinutes,
+            focusSkills,
+          },
+          weeklyPlans,
+          currentWeek: 1,
+          streakDays: 0,
+          generationSource,
+          generatedAt,
         },
-        weeklyPlans,
-        currentWeek: 1,
-        streakDays: 0,
-        generationSource,
-        lastActiveAt: undefined,
-        lastReview: undefined,
+        $unset: {
+          lastActiveAt: '',
+          lastReview: '',
+        },
       },
       { upsert: true, new: true, setDefaultsOnInsert: true },
     );
@@ -598,6 +909,7 @@ export class LearningPathService implements OnModuleInit {
     }
 
     const { weekStart } = this.getCurrentWeekWindow(learningPath);
+    const progressStartAt = this.getProgressStartAt(learningPath, weekStart);
     const weekKey = this.toWeekKey(weekStart);
     const refKey = String(
       body?.refKey || body?.refId || body?.postId || body?.resourceId || '',
@@ -615,13 +927,15 @@ export class LearningPathService implements OnModuleInit {
         refKey,
       },
       {
+        $set: {
+          level: body?.level || learningPath.level,
+          metadata: body?.metadata || {},
+        },
         $setOnInsert: {
           userId: userObjectId,
           skill,
           refKey,
-          level: body?.level || learningPath.level,
           weekKey,
-          metadata: body?.metadata || {},
         },
       },
       { upsert: true, new: true, setDefaultsOnInsert: true },
@@ -631,6 +945,7 @@ export class LearningPathService implements OnModuleInit {
       userId: userObjectId,
       skill,
       weekKey,
+      updatedAt: { $gte: progressStartAt },
     });
     const completedTask = await this.completeCurrentResourceTaskIfTargetReached(
       learningPath,
@@ -646,10 +961,574 @@ export class LearningPathService implements OnModuleInit {
     };
   }
 
-  private samplePlacementQuestions(level: PlacementLevel, skill: 'vocab' | 'grammar', size: number) {
+  private async findLearningPathById(id: string): Promise<LearningPathDocument> {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException('Invalid learning path id');
+    }
+    const learningPath = await this.learningPathModel.findById(id).exec();
+    if (!learningPath) {
+      throw new NotFoundException('Learning path not found');
+    }
+    return learningPath;
+  }
+
+  private async getUserMetaMap(userIds: any[]) {
+    const ids = [
+      ...new Set(
+        (userIds || [])
+          .map((id) => id?.toString())
+          .filter((id) => Types.ObjectId.isValid(id)),
+      ),
+    ];
+    if (!ids.length) return new Map<string, any>();
+
+    const objectIds = ids.map((id) => new Types.ObjectId(id));
+    const [users, profiles] = await Promise.all([
+      this.userModel
+        .find({ _id: { $in: objectIds } })
+        .select('email role status')
+        .lean()
+        .exec(),
+      this.profileModel
+        .find({ userId: { $in: objectIds } })
+        .select('userId name image_url')
+        .lean()
+        .exec(),
+    ]);
+    const profilesByUser = new Map(
+      profiles.map((profile: any) => [profile.userId?.toString(), profile]),
+    );
+
+    return new Map(
+      users.map((user: any) => {
+        const profile = profilesByUser.get(user._id.toString());
+        return [
+          user._id.toString(),
+          {
+            id: user._id.toString(),
+            email: user.email,
+            role: user.role,
+            status: user.status,
+            name: profile?.name,
+            avatar: profile?.image_url,
+          },
+        ];
+      }),
+    );
+  }
+
+  private toAdminLearningPathSummary(learningPath: any, userMeta: Map<string, any>) {
+    const userId = learningPath.userId?.toString();
+    const progress = this.calculatePlanProgress(learningPath);
+    return {
+      id: learningPath._id?.toString(),
+      userId,
+      user: userMeta.get(userId) || { id: userId },
+      level: learningPath.level,
+      goal: learningPath.goal,
+      currentWeek: learningPath.currentWeek || 1,
+      generationSource: learningPath.generationSource || 'fallback',
+      streakDays: learningPath.streakDays || 0,
+      weeklyPlanCount: learningPath.weeklyPlans?.length || 0,
+      lastReview: learningPath.lastReview,
+      progress,
+      createdAt: learningPath.createdAt,
+      generatedAt: learningPath.generatedAt,
+      updatedAt: learningPath.updatedAt,
+    };
+  }
+
+  private toAdminLearningPathDetail(learningPath: any, userMeta: Map<string, any>) {
+    return {
+      ...this.toAdminLearningPathSummary(learningPath, userMeta),
+      weeklyPlans: (learningPath.weeklyPlans || []).map((plan: any) => ({
+        week: Number(plan.week) || 1,
+        items: (plan.items || []).map((item: any, index: number) => ({
+          skill: item.skill,
+          refId: item.refId?.toString(),
+          refModel: item.refModel,
+          title: item.title,
+          targetCount: item.targetCount || 1,
+          order: Number(item.order) || index + 1,
+          estimatedMinutes: item.estimatedMinutes || 15,
+          completedAt: item.completedAt,
+        })),
+      })),
+    };
+  }
+
+  private calculatePlanProgress(learningPath: any) {
+    const weeklyPlans = learningPath.weeklyPlans || [];
+    const allItems = weeklyPlans.flatMap((plan: any) => plan.items || []);
+    const currentWeek = Number(learningPath.currentWeek) || 1;
+    const currentPlan =
+      weeklyPlans.find((plan: any) => Number(plan.week) === currentWeek) ||
+      weeklyPlans[currentWeek - 1];
+    const currentItems = currentPlan?.items || [];
+    const currentCompleted = currentItems.filter((item: any) => item.completedAt).length;
+    const totalCompleted = allItems.filter((item: any) => item.completedAt).length;
+    const skillStats = allItems.reduce((acc: any, item: any) => {
+      const skill = item.skill || 'unknown';
+      const current = acc[skill] || { total: 0, completed: 0 };
+      current.total += 1;
+      if (item.completedAt) current.completed += 1;
+      acc[skill] = current;
+      return acc;
+    }, {});
+    const startedAt = this.getLearningPathStartAt(learningPath);
+    const daysElapsed = !startedAt
+      ? 0
+      : Math.max(0, Math.floor((Date.now() - startedAt.getTime()) / (24 * 60 * 60 * 1000)));
+    const expectedWeek = Math.max(1, Math.floor(daysElapsed / 7) + 1);
+
+    return {
+      currentWeek,
+      currentWeekTotal: currentItems.length,
+      currentWeekCompleted: currentCompleted,
+      currentWeekPercent: currentItems.length
+        ? Math.round((currentCompleted / currentItems.length) * 100)
+        : 0,
+      totalItems: allItems.length,
+      completedItems: totalCompleted,
+      totalPercent: allItems.length ? Math.round((totalCompleted / allItems.length) * 100) : 0,
+      skillStats,
+      daysElapsed,
+      expectedWeek,
+      isBehind: expectedWeek > currentWeek + 1,
+      lastActiveAt: learningPath.lastActiveAt,
+    };
+  }
+
+  private async buildAdminProgressDetail(learningPath: any) {
+    const userId = learningPath.userId;
+    if (!userId || !Types.ObjectId.isValid(userId.toString())) {
+      return null;
+    }
+    const userObjectId = new Types.ObjectId(userId.toString());
+
+    const [cardStats, resourceStats, examStats] = await Promise.all([
+      this.jlptCardProgressModel
+        .aggregate([
+          { $match: { userId: userObjectId } },
+          {
+            $group: {
+              _id: { skill: '$skill', status: '$status' },
+              count: { $sum: 1 },
+            },
+          },
+        ])
+        .exec(),
+      this.learningResourceProgressModel
+        .aggregate([
+          { $match: { userId: userObjectId } },
+          {
+            $group: {
+              _id: '$skill',
+              count: { $sum: 1 },
+              lastUpdatedAt: { $max: '$updatedAt' },
+            },
+          },
+        ])
+        .exec(),
+      this.examResultModel
+        .find({ userId: userObjectId, status: ExamResultStatus.COMPLETED })
+        .sort({ end_time: -1, updatedAt: -1 })
+        .limit(20)
+        .lean()
+        .exec(),
+    ]);
+
+    const cards = cardStats.reduce((acc: any, row: any) => {
+      const skill = row._id?.skill;
+      const status = row._id?.status;
+      if (!skill || !status) return acc;
+      acc[skill] = acc[skill] || { known: 0, unknown: 0 };
+      acc[skill][status] = row.count;
+      return acc;
+    }, {});
+    const resources = resourceStats.reduce((acc: any, row: any) => {
+      acc[row._id] = {
+        completedResources: row.count,
+        lastUpdatedAt: row.lastUpdatedAt,
+      };
+      return acc;
+    }, {});
+    const scores = examStats.map((result: any) => Number(result.total_score) || 0);
+
+    return {
+      plan: this.calculatePlanProgress(learningPath),
+      cards,
+      resources,
+      exams: {
+        attemptCount: examStats.length,
+        passedCount: examStats.filter((result: any) => result.passed).length,
+        latestScore: scores[0] ?? null,
+        bestScore: scores.length ? Math.max(...scores) : null,
+        averageScore: scores.length
+          ? Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length)
+          : null,
+        latestAt: examStats[0]?.end_time || (examStats[0] as any)?.updatedAt || null,
+      },
+    };
+  }
+
+  private normalizeAdminWeeklyPlans(plans: any[]): WeeklyPlan[] {
+    return plans
+      .map((plan: any, planIndex: number) => {
+        const week = Math.max(Math.round(Number(plan.week) || planIndex + 1), 1);
+        const items = Array.isArray(plan.items) ? plan.items : [];
+        return {
+          week,
+          items: items
+            .map((item: any, itemIndex: number) => this.normalizeAdminWeeklyItem(item, itemIndex))
+            .filter(Boolean) as WeeklyItem[],
+        };
+      })
+      .filter((plan) => plan.items.length > 0)
+      .sort((a, b) => a.week - b.week)
+      .map((plan, index) => ({
+        ...plan,
+        week: index + 1,
+        items: plan.items.map((item, itemIndex) => ({
+          ...item,
+          order: itemIndex + 1,
+        })),
+      }));
+  }
+
+  private normalizeAdminWeeklyItem(item: any, index: number): WeeklyItem | null {
+    const skill = item?.skill as SkillType;
+    if (!SUPPORTED_CONTENT_SKILLS.includes(skill)) return null;
+
+    const normalized: WeeklyItem = {
+      skill,
+      title: String(item?.title || '').trim() || this.getGenericTaskTitle(skill, '', 1),
+      targetCount: Math.min(Math.max(Math.round(Number(item?.targetCount) || 1), 1), 500),
+      order: index + 1,
+      estimatedMinutes: Math.min(Math.max(Math.round(Number(item?.estimatedMinutes) || 15), 1), 1440),
+    };
+    if (item?.refId && Types.ObjectId.isValid(item.refId)) {
+      normalized.refId = new Types.ObjectId(item.refId);
+    }
+    if (item?.refModel) {
+      normalized.refModel = String(item.refModel).trim();
+    }
+    if (item?.completedAt) {
+      const completedAt = new Date(item.completedAt);
+      if (!Number.isNaN(completedAt.getTime())) {
+        normalized.completedAt = completedAt;
+      }
+    }
+
+    return normalized;
+  }
+
+  private normalizeSkillList(skills: any): SkillType[] {
+    const allowed = new Set<SkillType>(SUPPORTED_CONTENT_SKILLS);
+    const normalized = Array.isArray(skills)
+      ? skills.filter((skill): skill is SkillType => allowed.has(skill))
+      : [];
+    return [...new Set(normalized)].length ? [...new Set(normalized)] : ['vocab', 'grammar', 'kanji'];
+  }
+
+  private normalizePlacementQuestionPayload(body: any, partial = false) {
+    const payload: any = {};
+    const content = String(body?.content || '').trim();
+    const options = Array.isArray(body?.options)
+      ? body.options.map((option: any) => String(option || '').trim()).filter(Boolean)
+      : [];
+    const correctAnswer = Number(body?.correctAnswer);
+    const level = body?.level;
+    const skill = body?.skill;
+
+    if (!partial || content) payload.content = content;
+    if (!partial || options.length) payload.options = options;
+    if (!partial || Number.isFinite(correctAnswer)) payload.correctAnswer = correctAnswer;
+    if (!partial || level) payload.level = level;
+    if (!partial || skill) payload.skill = skill;
+    if (!partial || Object.prototype.hasOwnProperty.call(body || {}, 'explanation')) {
+      payload.explanation = String(body?.explanation || '').trim();
+    }
+    if (!partial || Object.prototype.hasOwnProperty.call(body || {}, 'isActive')) {
+      payload.isActive = body?.isActive !== false;
+    }
+    if (!partial || Object.prototype.hasOwnProperty.call(body || {}, 'difficulty')) {
+      payload.difficulty = ['easy', 'medium', 'hard'].includes(body?.difficulty)
+        ? body.difficulty
+        : 'medium';
+    }
+    if (!partial || Object.prototype.hasOwnProperty.call(body || {}, 'tags')) {
+      payload.tags = Array.isArray(body?.tags)
+        ? body.tags.map((tag: any) => String(tag || '').trim()).filter(Boolean)
+        : [];
+    }
+    if (!partial || Object.prototype.hasOwnProperty.call(body || {}, 'general')) {
+      payload.general = this.normalizePlacementGeneral(body?.general);
+    }
+
+    if (!partial || content || options.length || Number.isFinite(correctAnswer) || level || skill) {
+      if (!payload.content) throw new BadRequestException('content is required');
+      if (!Array.isArray(payload.options) || payload.options.length !== 4) {
+        throw new BadRequestException('options must include 4 choices');
+      }
+      if (!Number.isInteger(payload.correctAnswer) || payload.correctAnswer < 0 || payload.correctAnswer > 3) {
+        throw new BadRequestException('correctAnswer must be 0-3');
+      }
+      if (!LEVELS.includes(payload.level)) {
+        throw new BadRequestException('Invalid placement level');
+      }
+      if (!PLACEMENT_SKILLS.includes(payload.skill)) {
+        throw new BadRequestException('Invalid placement skill');
+      }
+    }
+
+    return payload;
+  }
+
+  private toAdminPlacementQuestion(question: any) {
+    return {
+      id: question._id?.toString(),
+      content: question.content,
+      options: question.options || [],
+      correctAnswer: question.correctAnswer,
+      level: question.level,
+      skill: question.skill,
+      general: question.general || {},
+      explanation: question.explanation || '',
+      isActive: question.isActive !== false,
+      difficulty: question.difficulty || 'medium',
+      tags: question.tags || [],
+      createdAt: question.createdAt,
+      updatedAt: question.updatedAt,
+    };
+  }
+
+  private normalizePlacementGeneral(general: any) {
+    const audioScript = general?.audioScript;
+    return {
+      audio: String(general?.audio || '').trim(),
+      image: String(general?.image || '').trim(),
+      txt_read: String(general?.txt_read || '').trim(),
+      audioScript: audioScript && Array.isArray(audioScript.lines)
+        ? {
+            mode: audioScript.mode === 'dialogue' ? 'dialogue' : 'single',
+            pauseMs: Math.max(Number(audioScript.pauseMs) || 500, 0),
+            lines: audioScript.lines
+              .map((line: any) => ({
+                speakerLabel: String(line?.speakerLabel || '').trim(),
+                speakerId: Number.isFinite(Number(line?.speakerId)) ? Number(line.speakerId) : undefined,
+                text: String(line?.text || '').trim(),
+              }))
+              .filter((line: any) => line.text),
+          }
+        : null,
+    };
+  }
+
+  private createEmptyPlacementLevelCounts(): PlacementLevelCounts {
+    return Object.fromEntries(LEVELS.map((level) => [level, 0])) as PlacementLevelCounts;
+  }
+
+  private createEmptyPlacementSkillMatrix(): PlacementTestSkillMatrix {
+    return Object.fromEntries(
+      LEVELS.map((level) => [
+        level,
+        Object.fromEntries(
+          PLACEMENT_SKILLS.map((skill) => [skill, 0]),
+        ) as PlacementSkillCounts,
+      ]),
+    ) as PlacementTestSkillMatrix;
+  }
+
+  private createDefaultPlacementTestConfig() {
+    const skillCounts = this.createEmptyPlacementSkillMatrix();
+    const levelCounts = this.createEmptyPlacementLevelCounts();
+    for (const level of LEVELS) {
+      skillCounts[level] = { vocab: 2, grammar: 2, listening: 0 };
+      levelCounts[level] = 4;
+    }
+
+    return {
+      id: null,
+      totalQuestions: 20,
+      levelCounts,
+      skillCounts,
+      secondsPerQuestion: 90,
+      isActive: true,
+      createdAt: null,
+      updatedAt: null,
+    };
+  }
+
+  private toAdminPlacementTestConfig(config: any) {
+    const normalized = this.normalizePlacementTestConfigPayload(config);
+    return {
+      id: config?._id?.toString() || null,
+      ...normalized,
+      createdAt: config?.createdAt || null,
+      updatedAt: config?.updatedAt || null,
+    };
+  }
+
+  private normalizePlacementTestConfigPayload(body: any) {
+    const totalQuestions = this.normalizePlacementCount(
+      body?.totalQuestions,
+      'totalQuestions',
+      true,
+    );
+    const levelCounts = this.createEmptyPlacementLevelCounts();
+    const skillCounts = this.createEmptyPlacementSkillMatrix();
+
+    for (const level of LEVELS) {
+      levelCounts[level] = this.normalizePlacementCount(
+        body?.levelCounts?.[level],
+        `levelCounts.${level}`,
+      );
+      for (const skill of PLACEMENT_SKILLS) {
+        skillCounts[level][skill] = this.normalizePlacementCount(
+          body?.skillCounts?.[level]?.[skill],
+          `skillCounts.${level}.${skill}`,
+        );
+      }
+    }
+
+    return {
+      totalQuestions,
+      levelCounts,
+      skillCounts,
+      secondsPerQuestion: this.normalizePlacementSecondsPerQuestion(body?.secondsPerQuestion),
+      isActive: body?.isActive !== false,
+    };
+  }
+
+  private normalizePlacementSecondsPerQuestion(value: any) {
+    const numberValue = Number(value) || 90;
+    return PLACEMENT_SECONDS_PER_QUESTION_OPTIONS.includes(numberValue)
+      ? numberValue
+      : 90;
+  }
+
+  private normalizePlacementCount(value: any, field: string, positive = false) {
+    const numberValue = Number(value);
+    if (!Number.isInteger(numberValue) || numberValue < (positive ? 1 : 0)) {
+      throw new BadRequestException(`${field} must be a ${positive ? 'positive ' : ''}integer`);
+    }
+    return numberValue;
+  }
+
+  private validatePlacementTestConfig(
+    config: any,
+    availability: PlacementAvailability,
+  ): PlacementConfigValidation {
+    const errors: string[] = [];
+    const levelTotal = LEVELS.reduce(
+      (total, level) => total + Number(config?.levelCounts?.[level] || 0),
+      0,
+    );
+
+    if (levelTotal !== Number(config?.totalQuestions || 0)) {
+      errors.push(
+        `Tổng số câu theo level (${levelTotal}) phải bằng tổng số câu bộ test (${config?.totalQuestions || 0}).`,
+      );
+    }
+
+    for (const level of LEVELS) {
+      const skillTotal = PLACEMENT_SKILLS.reduce(
+        (total, skill) => total + Number(config?.skillCounts?.[level]?.[skill] || 0),
+        0,
+      );
+      const levelCount = Number(config?.levelCounts?.[level] || 0);
+      if (skillTotal !== levelCount) {
+        errors.push(
+          `${level}: tổng vocab/grammar/listening (${skillTotal}) phải bằng số câu ${level} (${levelCount}).`,
+        );
+      }
+
+      for (const skill of PLACEMENT_SKILLS) {
+        const requested = Number(config?.skillCounts?.[level]?.[skill] || 0);
+        const available = Number(availability.skillCounts[level]?.[skill] || 0);
+        if (requested > available) {
+          errors.push(
+            `${level} ${skill}: cần ${requested} câu nhưng ngân hàng active chỉ có ${available}.`,
+          );
+        }
+      }
+    }
+
+    return {
+      isValid: errors.length === 0,
+      errors,
+    };
+  }
+
+  private async getPlacementAvailability(): Promise<PlacementAvailability> {
+    const skillCounts = this.createEmptyPlacementSkillMatrix();
+    const levelCounts = this.createEmptyPlacementLevelCounts();
+    const rows = await this.placementQuestionModel
+      .aggregate([
+        { $match: { isActive: { $ne: false } } },
+        { $group: { _id: { level: '$level', skill: '$skill' }, count: { $sum: 1 } } },
+      ])
+      .exec();
+
+    for (const row of rows) {
+      const level = row?._id?.level as PlacementLevel;
+      const skill = row?._id?.skill as PlacementSkill;
+      if (!LEVELS.includes(level) || !PLACEMENT_SKILLS.includes(skill)) continue;
+      skillCounts[level][skill] = Number(row.count) || 0;
+      levelCounts[level] += Number(row.count) || 0;
+    }
+
+    return {
+      total: LEVELS.reduce((total, level) => total + levelCounts[level], 0),
+      levelCounts,
+      skillCounts,
+    };
+  }
+
+  private async getConfiguredPlacementQuestions(config: any) {
+    const normalizedConfig = this.toAdminPlacementTestConfig(config);
+    const availability = await this.getPlacementAvailability();
+    const validation = this.validatePlacementTestConfig(normalizedConfig, availability);
+    if (!validation.isValid) {
+      throw new BadRequestException(validation.errors.join(' '));
+    }
+
+    const selected: any[] = [];
+    for (const level of LEVELS) {
+      for (const skill of PLACEMENT_SKILLS) {
+        const size = normalizedConfig.skillCounts[level][skill];
+        if (size <= 0) continue;
+        const questions = await this.samplePlacementQuestions(level, skill, size);
+        if (questions.length < size) {
+          throw new BadRequestException(
+            `${level} ${skill}: không đủ câu hỏi active để tạo đề.`,
+          );
+        }
+        selected.push(...questions);
+      }
+    }
+
+    const questions = this.shuffle(selected).map((question: any) => ({
+      id: question._id?.toString(),
+      content: question.content,
+      options: question.options,
+      level: question.level,
+      skill: question.skill,
+      general: question.general || {},
+    }));
+
+    return {
+      questions,
+      secondsPerQuestion: normalizedConfig.secondsPerQuestion,
+      totalSeconds: questions.length * normalizedConfig.secondsPerQuestion,
+    };
+  }
+
+  private samplePlacementQuestions(level: PlacementLevel, skill: PlacementSkill, size: number) {
     return this.placementQuestionModel
       .aggregate([
-        { $match: { level, skill } },
+        { $match: { level, skill, isActive: { $ne: false } } },
         { $sample: { size } },
       ])
       .exec();
@@ -715,14 +1594,14 @@ export class LearningPathService implements OnModuleInit {
 
   private async askAiForBoundaryLevel(
     levelBreakdown: Record<PlacementLevel, number>,
-    skillBreakdown: { vocab: number; grammar: number },
+    skillBreakdown: Record<PlacementSkill, number>,
     fallback: PlacementLevel,
     maxAllowedLevel: PlacementLevel,
   ): Promise<PlacementLevel> {
     try {
       const prompt = `
 User placement JLPT breakdown: ${JSON.stringify(levelBreakdown)}.
-Skill vocab: ${skillBreakdown.vocab}%, grammar: ${skillBreakdown.grammar}%.
+Skill vocab: ${skillBreakdown.vocab}%, grammar: ${skillBreakdown.grammar}%, listening: ${skillBreakdown.listening}%.
 
 IMPORTANT grading rules:
 - Apply a heavy foundation penalty. If the user misses easy levels, do NOT reward lucky guesses at higher levels.
@@ -784,8 +1663,175 @@ Tra ve JSON {"suggestedLevel":"N5|N4|N3|N2|N1","reason":"..."}
     return { weekStart, weekEnd };
   }
 
+  private getLearningPathStartAt(learningPath: any) {
+    const startedAt = new Date(learningPath?.generatedAt || learningPath?.createdAt);
+    return Number.isNaN(startedAt.getTime()) ? null : startedAt;
+  }
+
+  private getProgressStartAt(learningPath: any, weekStart: Date) {
+    const startedAt = this.getLearningPathStartAt(learningPath);
+    return startedAt && startedAt > weekStart ? startedAt : weekStart;
+  }
+
   private toWeekKey(weekStart: Date) {
     return weekStart.toISOString().slice(0, 10);
+  }
+
+  private getTodayProgressWindow(learningPath: any) {
+    const now = new Date();
+    const dayStart = new Date(now);
+    dayStart.setHours(0, 0, 0, 0);
+    const progressStartAt = this.getProgressStartAt(learningPath, dayStart);
+    return { progressStartAt, now };
+  }
+
+  private async buildTodayTasks(
+    userId: string,
+    learningPath: LearningPathDocument,
+    enrichedWeekItems: any[],
+    dailyMinutes: number,
+  ) {
+    const userObjectId = new Types.ObjectId(userId);
+    const { progressStartAt, now } = this.getTodayProgressWindow(learningPath);
+    const { weekStart } = this.getCurrentWeekWindow(learningPath);
+    const weekKey = this.toWeekKey(weekStart);
+    const level = learningPath.level;
+    const examIds = await this.examModel
+      .find({ level }, { _id: 1 })
+      .lean()
+      .exec();
+    const examObjectIds = examIds.map((exam: any) => exam._id);
+
+    const [knownTodayBySkill, passedExamTodayCount, latestPassedExamToday, resourceTodayCounts] =
+      await Promise.all([
+        this.getWeeklyKnownCounts(userObjectId, level, progressStartAt, now),
+        examObjectIds.length
+          ? this.examResultModel.countDocuments({
+              userId: userObjectId,
+              examId: { $in: examObjectIds },
+              status: ExamResultStatus.COMPLETED,
+              total_score: { $gte: 80 },
+              end_time: { $gte: progressStartAt, $lte: now },
+            })
+          : 0,
+        examObjectIds.length
+          ? this.examResultModel
+              .findOne({
+                userId: userObjectId,
+                examId: { $in: examObjectIds },
+                status: ExamResultStatus.COMPLETED,
+                end_time: { $gte: progressStartAt, $lte: now },
+              })
+              .sort({ total_score: -1, end_time: -1, createdAt: -1 })
+              .lean()
+              .exec()
+          : null,
+        this.getWeeklyResourceCounts(userObjectId, weekKey, progressStartAt),
+      ]);
+
+    const dailyCaps = this.getGenericTaskCounts(dailyMinutes);
+    const tasks: any[] = [];
+    let assignedMinutes = 0;
+
+    for (const item of enrichedWeekItems
+      .filter((weekItem) => !weekItem.progress?.isComplete)
+      .sort((a, b) => (a.order || 0) - (b.order || 0))) {
+      if (assignedMinutes >= dailyMinutes && tasks.length) break;
+
+      const weeklyTarget = Number(item.progress?.target ?? item.targetCount) || 1;
+      const weeklyCount = Number(item.progress?.count) || 0;
+      const remainingWeeklyCount = Math.max(weeklyTarget - weeklyCount, 0);
+      if (!remainingWeeklyCount) continue;
+
+      const unitMinutes = Math.max(
+        this.getGenericEstimatedMinutes(item.skill, weeklyTarget) / weeklyTarget,
+        1,
+      );
+      const remainingMinutes = Math.max(dailyMinutes - assignedMinutes, 0);
+      const affordableCount = remainingMinutes > 0
+        ? Math.max(1, Math.ceil(remainingMinutes / unitMinutes))
+        : 1;
+      const dailyTarget = Math.max(
+        1,
+        Math.min(remainingWeeklyCount, dailyCaps[item.skill] ?? remainingWeeklyCount, affordableCount),
+      );
+      const estimatedMinutes = Math.max(1, Math.ceil(unitMinutes * dailyTarget));
+      const todayProgressCount = Math.min(
+        this.getTodayProgressCountForSkill(
+          item.skill,
+          knownTodayBySkill,
+          passedExamTodayCount,
+          resourceTodayCounts,
+        ),
+        dailyTarget,
+      );
+      const percent = Math.min(100, Math.round((todayProgressCount / dailyTarget) * 100));
+
+      assignedMinutes += estimatedMinutes;
+      if (percent >= 100) continue;
+
+      tasks.push({
+        ...item,
+        title: this.getGenericTaskTitle(item.skill, learningPath.level, dailyTarget),
+        targetCount: dailyTarget,
+        estimatedMinutes,
+        completedAt: undefined,
+        progress: {
+          ...(item.progress || {}),
+          count: todayProgressCount,
+          target: dailyTarget,
+          percent,
+          isComplete: false,
+          label: this.getProgressLabel(item.skill, todayProgressCount, dailyTarget, true),
+          requirement: this.getTodayRequirement(item.skill, dailyTarget),
+          latestScore:
+            item.skill === 'jlpt_exam' && latestPassedExamToday
+              ? Number((latestPassedExamToday as any).total_score) || 0
+              : null,
+        },
+      });
+    }
+
+    return tasks;
+  }
+
+  private getTodayProgressCountForSkill(
+    skill: SkillType,
+    knownTodayBySkill: Record<string, number>,
+    passedExamTodayCount: number,
+    resourceTodayCounts: Record<ResourceProgressSkill, number>,
+  ) {
+    if (['vocab', 'grammar', 'kanji'].includes(skill)) {
+      return Number(knownTodayBySkill[skill]) || 0;
+    }
+    if (skill === 'jlpt_exam') return Number(passedExamTodayCount) || 0;
+    if (skill === 'reading') return Number(resourceTodayCounts.reading) || 0;
+    if (skill === 'writing') return Number(resourceTodayCounts.writing) || 0;
+    return 0;
+  }
+
+  private getProgressLabel(
+    skill: SkillType,
+    count: number,
+    target: number,
+    today = false,
+  ) {
+    const suffix = today ? ' hôm nay' : '';
+    if (skill === 'jlpt_exam') return `${count}/${target} đề đạt >=80${suffix}`;
+    if (skill === 'reading') return `${count}/${target} bài đọc${suffix}`;
+    if (skill === 'writing') return `${count}/${target} PDF${suffix}`;
+    return `${count}/${target} mục${suffix}`;
+  }
+
+  private getTodayRequirement(skill: SkillType, target: number) {
+    if (['vocab', 'grammar', 'kanji'].includes(skill)) {
+      return `Mục tiêu hôm nay: đánh dấu Đã thuộc ${target} mục`;
+    }
+    if (skill === 'jlpt_exam') return `Mục tiêu hôm nay: hoàn thành ${target} đề đạt từ 80 điểm`;
+    if (skill === 'reading') return `Mục tiêu hôm nay: đọc ${target} bài`;
+    if (skill === 'writing') return `Mục tiêu hôm nay: tải ${target} PDF luyện viết`;
+    if (skill === 'conversation') return `Mục tiêu hôm nay: luyện ${target} bài hội thoại`;
+    return `Mục tiêu hôm nay: hoàn thành ${target} mục`;
   }
 
   private async enrichWeeklyItems(
@@ -795,6 +1841,7 @@ Tra ve JSON {"suggestedLevel":"N5|N4|N3|N2|N1","reason":"..."}
   ) {
     const userObjectId = new Types.ObjectId(userId);
     const { weekStart, weekEnd } = this.getCurrentWeekWindow(learningPath);
+    const progressStartAt = this.getProgressStartAt(learningPath, weekStart);
     const weekKey = this.toWeekKey(weekStart);
     const level = learningPath.level;
     const examIds = await this.examModel
@@ -804,14 +1851,14 @@ Tra ve JSON {"suggestedLevel":"N5|N4|N3|N2|N1","reason":"..."}
     const examObjectIds = examIds.map((exam: any) => exam._id);
 
     const [knownBySkill, passedExamCount, latestPassedExam, resourceCounts] = await Promise.all([
-      this.getWeeklyKnownCounts(userObjectId, level, weekStart, weekEnd),
+      this.getWeeklyKnownCounts(userObjectId, level, progressStartAt, weekEnd),
       examObjectIds.length
         ? this.examResultModel.countDocuments({
             userId: userObjectId,
             examId: { $in: examObjectIds },
             status: ExamResultStatus.COMPLETED,
             total_score: { $gte: 80 },
-            end_time: { $gte: weekStart, $lt: weekEnd },
+            end_time: { $gte: progressStartAt, $lt: weekEnd },
           })
         : 0,
       examObjectIds.length
@@ -820,13 +1867,13 @@ Tra ve JSON {"suggestedLevel":"N5|N4|N3|N2|N1","reason":"..."}
               userId: userObjectId,
               examId: { $in: examObjectIds },
               status: ExamResultStatus.COMPLETED,
-              end_time: { $gte: weekStart, $lt: weekEnd },
+              end_time: { $gte: progressStartAt, $lt: weekEnd },
             })
             .sort({ total_score: -1, end_time: -1, createdAt: -1 })
             .lean()
             .exec()
         : null,
-      this.getWeeklyResourceCounts(userObjectId, weekKey),
+      this.getWeeklyResourceCounts(userObjectId, weekKey, progressStartAt),
     ]);
 
     return weekItems.map((item: any) => {
@@ -871,14 +1918,7 @@ Tra ve JSON {"suggestedLevel":"N5|N4|N3|N2|N1","reason":"..."}
           target: targetCount,
           percent,
           isComplete,
-          label:
-            item.skill === 'jlpt_exam'
-              ? `${progressCount}/${targetCount} đề đạt >=80`
-              : item.skill === 'reading'
-                ? `${progressCount}/${targetCount} bài đọc`
-                : item.skill === 'writing'
-                  ? `${progressCount}/${targetCount} PDF`
-              : `${progressCount}/${targetCount} mục`,
+          label: this.getProgressLabel(item.skill, progressCount, targetCount),
           requirement,
           latestScore,
         },
@@ -889,7 +1929,7 @@ Tra ve JSON {"suggestedLevel":"N5|N4|N3|N2|N1","reason":"..."}
   private async getWeeklyKnownCounts(
     userId: Types.ObjectId,
     level: string,
-    weekStart: Date,
+    progressStartAt: Date,
     weekEnd: Date,
   ) {
     const rows = await this.jlptCardProgressModel
@@ -899,7 +1939,7 @@ Tra ve JSON {"suggestedLevel":"N5|N4|N3|N2|N1","reason":"..."}
             userId,
             level,
             status: 'known',
-            updatedAt: { $gte: weekStart, $lt: weekEnd },
+            updatedAt: { $gte: progressStartAt, $lt: weekEnd },
           },
         },
         { $group: { _id: '$skill', count: { $sum: 1 } } },
@@ -915,6 +1955,7 @@ Tra ve JSON {"suggestedLevel":"N5|N4|N3|N2|N1","reason":"..."}
   private async getWeeklyResourceCounts(
     userId: Types.ObjectId,
     weekKey: string,
+    progressStartAt: Date,
   ) {
     const rows = await this.learningResourceProgressModel
       .aggregate([
@@ -923,6 +1964,7 @@ Tra ve JSON {"suggestedLevel":"N5|N4|N3|N2|N1","reason":"..."}
             userId,
             weekKey,
             skill: { $in: ['reading', 'writing'] },
+            updatedAt: { $gte: progressStartAt },
           },
         },
         { $group: { _id: '$skill', count: { $sum: 1 } } },
@@ -1004,12 +2046,13 @@ Tra ve JSON {"suggestedLevel":"N5|N4|N3|N2|N1","reason":"..."}
     if (!learningPath) return 0;
 
     const { weekStart, weekEnd } = this.getCurrentWeekWindow(learningPath);
+    const progressStartAt = this.getProgressStartAt(learningPath, weekStart);
     return this.jlptCardProgressModel.countDocuments({
       userId: new Types.ObjectId(userId),
       skill,
       level,
       status: 'known',
-      updatedAt: { $gte: weekStart, $lt: weekEnd },
+      updatedAt: { $gte: progressStartAt, $lt: weekEnd },
     });
   }
 
@@ -1085,10 +2128,10 @@ Tra ve JSON {"suggestedLevel":"N5|N4|N3|N2|N1","reason":"..."}
   ) {
     const completedItems = enrichedWeekItems.filter((item) => item.progress?.isComplete).length;
     const totalItems = enrichedWeekItems.length;
-    const createdAt = new Date((learningPath as any).createdAt);
-    const daysElapsed = Number.isNaN(createdAt.getTime())
+    const startedAt = this.getLearningPathStartAt(learningPath);
+    const daysElapsed = !startedAt
       ? 0
-      : Math.max(0, Math.floor((Date.now() - createdAt.getTime()) / (24 * 60 * 60 * 1000)));
+      : Math.max(0, Math.floor((Date.now() - startedAt.getTime()) / (24 * 60 * 60 * 1000)));
 
     const skillStats = enrichedWeekItems.reduce((acc, item) => {
       const skill = item.skill as SkillType;
@@ -1304,6 +2347,7 @@ Schema:
     level: string;
     goalTypes: GoalType[];
     dailyMinutes: number;
+    targetScore?: number;
     focusSkills: SkillType[];
     totalWeeks: number;
     fallbackPlans: WeeklyPlan[];
@@ -1316,6 +2360,7 @@ Thong tin nguoi hoc:
 - Muc tieu: ${input.goalTypes.join(', ')}
 - Ky nang uu tien: ${input.focusSkills.join(', ')}
 - Thoi gian hoc: ${input.dailyMinutes} phut/ngay
+${input.goalTypes.includes('jlpt_exam') && input.targetScore !== undefined ? `- Diem JLPT mong muon: ${input.targetScore}/180` : ''}
 - So tuan: ${input.totalWeeks}
 
 Plan nen hien tai de tham khao:
