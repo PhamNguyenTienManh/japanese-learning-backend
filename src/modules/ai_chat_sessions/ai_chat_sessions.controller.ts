@@ -1,6 +1,11 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Req, Res } from '@nestjs/common';
 import type { Response } from 'express';
-import { ConfirmNotebookAddDto, CreateMessageDto, UpdateSessionDto } from './dto/ai-chat.dto';
+import {
+    ConfirmNotebookAddDto,
+    ConfirmNotebookCreateDto,
+    CreateMessageDto,
+    UpdateSessionDto,
+} from './dto/ai-chat.dto';
 import { AiChatSessionsService } from './ai_chat_sessions.service';
 
 @Controller('ai-chat')
@@ -132,6 +137,20 @@ export class AiChatSessionsController {
     ) {
         const userId = req.user.sub;
         return this.aiChatService.addNotebookItemsFromAction(sessionId, body, userId);
+    }
+
+    /**
+     * POST /ai-chat/:sessionId/notebook-actions/create-limited
+     * Xác nhận tạo sổ tay khi yêu cầu ban đầu vượt giới hạn 30 từ vựng/lần
+     */
+    @Post(':sessionId/notebook-actions/create-limited')
+    async createNotebookFromAction(
+        @Param('sessionId') sessionId: string,
+        @Body() body: ConfirmNotebookCreateDto,
+        @Req() req: any,
+    ) {
+        const userId = req.user.sub;
+        return this.aiChatService.createNotebookFromAction(sessionId, body, userId);
     }
 
     /**

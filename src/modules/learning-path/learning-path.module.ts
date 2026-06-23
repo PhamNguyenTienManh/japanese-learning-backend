@@ -11,11 +11,17 @@ import { LearningPathController } from './learning-path.controller';
 import { LearningPathService } from './learning-path.service';
 import { LearningPath, LearningPathSchema } from './schemas/learning-path.schema';
 import { JlptCardProgress, JlptCardProgressSchema } from './schemas/jlpt-card-progress.schema';
+import { Profile, ProfileSchema } from '../profiles/schemas/profiles.schema';
+import { User, UserSchema } from '../users/schemas/user.schema';
 import {
   LearningResourceProgress,
   LearningResourceProgressSchema,
 } from './schemas/learning-resource-progress.schema';
 import { PlacementQuestion, PlacementQuestionSchema } from './schemas/placement-question.schema';
+import {
+  PlacementTestConfig,
+  PlacementTestConfigSchema,
+} from './schemas/placement-test-config.schema';
 
 @Module({
   imports: [
@@ -25,12 +31,15 @@ import { PlacementQuestion, PlacementQuestionSchema } from './schemas/placement-
       { name: JlptCardProgress.name, schema: JlptCardProgressSchema },
       { name: LearningResourceProgress.name, schema: LearningResourceProgressSchema },
       { name: PlacementQuestion.name, schema: PlacementQuestionSchema },
+      { name: PlacementTestConfig.name, schema: PlacementTestConfigSchema },
       { name: JlptWord.name, schema: JlptWordSchema },
       { name: JlptKanji.name, schema: JlptKanjiSchema },
       { name: JlptGrammar.name, schema: JlptGrammarSchema },
       { name: Exam.name, schema: ExamSchema },
       { name: ExamResult.name, schema: ExamResultSchema },
       { name: ConversationLesson.name, schema: ConversationLessonSchema },
+      { name: User.name, schema: UserSchema },
+      { name: Profile.name, schema: ProfileSchema },
     ]),
   ],
   controllers: [LearningPathController],

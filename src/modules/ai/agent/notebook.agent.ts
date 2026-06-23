@@ -93,11 +93,11 @@ B) 見つからなかった場合 (返り値が []):
 
 Notebook items は必ず以下の形式で生成：
 [
-  {"name":"日","notes":"Mặt trời","mean":"Sun","phonetic":"ひ"},
-  {"name":"月","notes":"Mặt trăng","mean":"Moon","phonetic":"つき"}
+  {"name":"日","mean":"mặt trời; ngày","notes":"Có thể đọc là にち/じつ trong từ ghép, hoặc ひ khi đứng riêng.","phonetic":"ひ"},
+  {"name":"月","mean":"mặt trăng; tháng","notes":"Có thể đọc là げつ/がつ trong từ ghép, hoặc つき khi đứng riêng.","phonetic":"つき"}
 ]
 
-必須: name, notes, mean, phonetic`;
+必須: name, mean, notes, phonetic。mean は必ずベトナム語の主な意味。notes はベトナム語の補足説明・使い方・ニュアンスのみ。mean に英語を使わない。`;
 
   private histories = new Map<string, BaseChatMessageHistory>();
   private tools: ToolInterface[] = [];
@@ -195,9 +195,11 @@ User request: ${prompt}
 IMPORTANT:
 - ALWAYS generate a JSON array.
 - No explanation, markdown, or code block.
-- Each item must have: name, notes (Vietnamese translation), mean (English meaning), phonetic (hiragana/katakana reading)
+- Each item must have: name, mean (Vietnamese meaning; concise dictionary meaning), notes (Vietnamese study note; extra usage nuance, context, or a short explanation), phonetic (hiragana/katakana reading)
+- Do NOT use English in mean. mean must be Vietnamese.
+- notes is only supplementary; do not put the primary meaning only in notes.
 - Output example:
-[{"name":"日","notes":"Mặt trời","mean":"Sun","phonetic":"ひ"}]
+[{"name":"日","mean":"mặt trời; ngày","notes":"Có thể đọc là にち/じつ trong từ ghép, hoặc ひ khi đứng riêng.","phonetic":"ひ"}]
 
 Generate the items now:
 `;
