@@ -54,6 +54,7 @@ import { PaymentsModule } from "./modules/payments/payments.module";
 import { ModerationModule } from "./modules/moderation/moderation.module";
 import { ConversationModule } from "./modules/conversation/conversation.module";
 import { LearningPathModule } from "./modules/learning-path/learning-path.module";
+import { KanaModule } from "./modules/kana/kana.module";
 
 
 @Module({
@@ -107,6 +108,7 @@ import { LearningPathModule } from "./modules/learning-path/learning-path.module
     ModerationModule,
     ConversationModule,
     LearningPathModule,
+    KanaModule,
 
     CacheModule.registerAsync({
       useFactory: async () => {
