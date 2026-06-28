@@ -11,6 +11,7 @@ import {
   KanaCombinationSection,
 } from './data/kana-combinations.data';
 import { KANA_BASICS_DATA, KanaBasicSection } from './data/kana-basics.data';
+import { KANA_RADICALS_DATA, KanaRadicalSection } from './data/kana-radicals.data';
 
 export interface KanaGroupResponse {
   groupKey: string;
@@ -50,5 +51,9 @@ export class KanaService {
 
   getBasics(): KanaBasicSection[] {
     return KANA_BASICS_DATA;
+  }
+
+  getRadicals(): KanaRadicalSection[] {
+    return KANA_RADICALS_DATA;
   }
 }
