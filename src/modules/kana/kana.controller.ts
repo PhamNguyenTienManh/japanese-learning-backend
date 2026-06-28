@@ -24,4 +24,10 @@ export class KanaController {
   getBasics() {
     return this.kanaService.getBasics();
   }
+
+  @Public()
+  @Get('radicals')
+  getRadicals() {
+    return this.kanaService.getRadicals();
+  }
 }
