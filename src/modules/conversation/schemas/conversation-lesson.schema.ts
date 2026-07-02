@@ -28,6 +28,39 @@ class ConversationLine {
   vietnamese: string;
 }
 
+@Schema({ _id: false })
+class ConversationVocabulary {
+  @Prop({ type: Number, default: 0 })
+  order: number;
+
+  @Prop({ type: String, required: true })
+  word: string;
+
+  @Prop({ type: String, default: "" })
+  furigana: string;
+
+  @Prop({ type: String, default: "" })
+  meaning: string;
+}
+
+@Schema({ _id: false })
+class ConversationGrammar {
+  @Prop({ type: Number, default: 0 })
+  order: number;
+
+  @Prop({ type: String, required: true })
+  title: string;
+
+  @Prop({ type: String, default: "" })
+  meaning: string;
+
+  @Prop({ type: String, default: "" })
+  example: string;
+
+  @Prop({ type: String, default: "" })
+  exampleMeaning: string;
+}
+
 @Schema({ timestamps: true, collection: "conversation_lessons" })
 export class ConversationLesson extends Document {
   @Prop({ type: ConversationLessonCategory, required: true })
@@ -45,6 +78,9 @@ export class ConversationLesson extends Document {
   @Prop({ type: String, default: "" })
   image: string;
 
+  @Prop({ type: String, default: "" })
+  description: string;
+
   @Prop({ type: Number, default: 0 })
   order: number;
 
@@ -53,6 +89,12 @@ export class ConversationLesson extends Document {
 
   @Prop({ type: [ConversationLine], default: [] })
   lines: ConversationLine[];
+
+  @Prop({ type: [ConversationVocabulary], default: [] })
+  vocabulary: ConversationVocabulary[];
+
+  @Prop({ type: [ConversationGrammar], default: [] })
+  grammar: ConversationGrammar[];
 }
 
 export const ConversationLessonSchema =

@@ -95,8 +95,15 @@ export class ConversationService {
       level: lesson.level,
       title: lesson.title,
       image: lesson.image,
+      description: lesson.description || "",
       order: lesson.order,
       lines: [...(lesson.lines || [])].sort(
+        (a, b) => (a.order || 0) - (b.order || 0),
+      ),
+      vocabulary: [...(lesson.vocabulary || [])].sort(
+        (a, b) => (a.order || 0) - (b.order || 0),
+      ),
+      grammar: [...(lesson.grammar || [])].sort(
         (a, b) => (a.order || 0) - (b.order || 0),
       ),
     };
