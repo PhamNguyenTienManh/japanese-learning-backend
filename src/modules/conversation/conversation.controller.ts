@@ -1,14 +1,15 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from "@nestjs/common";
 import { Public } from "../auth/public.decorator";
 import { ConversationService } from "./conversation.service";
 import { Roles } from "../auth/roles.decorator";
+import { PremiumGuard } from "../auth/premium.guard";
 
 @Controller("conversation")
 export class ConversationController {
   constructor(private readonly conversationService: ConversationService) {}
 
   @Get()
-  @Public()
+  @UseGuards(PremiumGuard)
   getList() {
     return this.conversationService.getList();
   }
@@ -56,7 +57,7 @@ export class ConversationController {
   }
 
   @Get(":idOrSlug")
-  @Public()
+  @UseGuards(PremiumGuard)
   getDetail(@Param("idOrSlug") idOrSlug: string) {
     return this.conversationService.getDetail(idOrSlug);
   }
