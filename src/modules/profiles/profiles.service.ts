@@ -5,6 +5,8 @@ import { Profile } from './schemas/profiles.schema';
 import { CreateProfileDto } from './dto/create-profile.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { User } from '../users/schemas/user.schema';
+import { Posts } from '../posts/schemas/posts.schema';
+import { Comment } from '../comments/schemas/comments.schema';
 
 
 @Injectable()
@@ -12,6 +14,8 @@ export class ProfilesService {
   constructor(
     @InjectModel(Profile.name) private profileModel: Model<Profile>,
     @InjectModel(User.name) private userModel: Model<User>,
+    @InjectModel(Posts.name) private postModel: Model<Posts>,
+    @InjectModel(Comment.name) private commentModel: Model<Comment>,
   ) {}
 
   // Hàm tạo profile mới
@@ -36,6 +40,39 @@ export class ProfilesService {
     return updated;
   }
 
+
+  async getActiveMembers(limit: number = 5): Promise<any[]> {
+    const activeProfiles = await this.postModel.aggregate([
+      { $match: { status: 1, isDeleted: { $ne: true } } },
+      {
+        $group: {
+          _id: '$profile_id',
+          postCount: { $sum: 1 },
+        },
+      },
+      { $sort: { postCount: -1 } },
+      { $limit: limit },
+      {
+        $lookup: {
+          from: 'profiles',
+          localField: '_id',
+          foreignField: '_id',
+          as: 'profile',
+        },
+      },
+      { $unwind: '$profile' },
+      {
+        $project: {
+          _id: '$profile._id',
+          name: '$profile.name',
+          image_url: '$profile.image_url',
+          postCount: 1,
+        },
+      },
+    ]);
+
+    return activeProfiles;
+  }
 
   async findByUserId(userId: string | Types.ObjectId): Promise<any> {
     const id = typeof userId === 'string' ? new Types.ObjectId(userId) : userId;

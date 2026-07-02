@@ -1,14 +1,21 @@
-import { BadRequestException, Body, Controller, Get, Param, Put, Req, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, Put, Query, Req, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { ProfilesService } from './profiles.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UploadService } from '../upload/upload.service';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { Public } from '../auth/public.decorator';
 
 @Controller('profiles')
 export class ProfilesController {
     constructor (
         private profilesService: ProfilesService,
         private readonly uploadService: UploadService) {}
+
+    @Public()
+    @Get('active-members')
+    async getActiveMembers(@Query('limit') limit: number = 5) {
+        return this.profilesService.getActiveMembers(Number(limit) || 5);
+    }
 
     @Get('me')
     async getProfile(@Req() req){

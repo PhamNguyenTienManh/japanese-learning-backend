@@ -4,6 +4,8 @@ import { ProfilesService } from './profiles.service';
 import { ProfilesController } from './profiles.controller';
 import { Profile, ProfileSchema } from './schemas/profiles.schema';
 import { User, UserSchema } from '../users/schemas/user.schema';
+import { Posts, PostSchema } from '../posts/schemas/posts.schema';
+import { Comment, CommentSchema } from '../comments/schemas/comments.schema';
 import { UploadModule } from '../upload/upload.module';
 
 @Module({
@@ -11,6 +13,8 @@ import { UploadModule } from '../upload/upload.module';
     MongooseModule.forFeature([
       { name: Profile.name, schema: ProfileSchema },
       { name: User.name, schema: UserSchema },
+      { name: Posts.name, schema: PostSchema },
+      { name: Comment.name, schema: CommentSchema },
     ]),
     UploadModule,
   ],
