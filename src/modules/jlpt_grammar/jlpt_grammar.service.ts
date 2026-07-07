@@ -108,6 +108,7 @@ export class JlptGrammarService {
       const [data, total] = await Promise.all([
         this.jlptGrammarModel
           .find(query, { title: 1, mean: 1 })
+          .sort({ _id: 1 }) // sort ổn định để phân trang theo tuần không lặp/sót
           .skip(skip)
           .limit(limit)
           .lean(), // lean() giúp lấy plain object thay vì mongoose document
