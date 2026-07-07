@@ -33,11 +33,7 @@ const FAST_REPLIES: FastReplyEntry[] = [
       "Không có gì đâu. Cần luyện thêm từ vựng, ngữ pháp hay hội thoại thì cứ nhắn mình nhé.",
   },
   {
-    patterns: ["ok", "oke", "okay", "uhm", "um", "u", "duoc", "duoc roi"],
-    reply: "Ừm, mình nghe đây.",
-  },
-  {
-    patterns: ["tam biet", "bye", "goodbye", "hen gap lai"],
+    patterns: ["tam biet", "bye", "goodbye", "hen gap lai", "bai", "bai bạn", "Gud bye"],
     reply: "Tạm biệt bạn, chúc bạn học tiếng Nhật thật đều tay nhé.",
   },
 ];

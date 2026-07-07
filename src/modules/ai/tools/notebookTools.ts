@@ -64,10 +64,10 @@ function findRequestedCountMatch(prompt: string): RegExpMatchArray | null {
 
   return (
     text.match(
-      /\b(\d{1,3})\s*(?:từ\s+vựng|từ|kanji|mục|items?|words?)\b/i,
+      /\b(\d{1,6})\s*(?:từ\s+vựng|tu\s+vung|từ|tu|kanji|mục|muc|items?|words?)\b/i,
     ) ||
     text.match(
-      /\b(?:thêm|tạo|sinh|generate|add|make|create)\s+(\d{1,3})\b/i,
+      /\b(?:thêm|them|tạo|tao|sinh|generate|add|make|create)\s+(\d{1,6})\b/i,
     )
   );
 }
