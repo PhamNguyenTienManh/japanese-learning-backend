@@ -22,6 +22,7 @@ import {
 } from "./dto/ai-chat.dto";
 import { ChatAgent } from "../ai/agent/chat.agent";
 import { AiLangfuseTracingService } from "../ai/service/ai-langfuse-tracing.service";
+import { MAX_NOTEBOOK_ITEMS_PER_ACTION } from "../ai/tools/notebookTools";
 
 const DAILY_AI_LIMIT = 50;
 const DAILY_AI_LIMIT_CODE = "DAILY_AI_LIMIT_EXCEEDED";
@@ -272,6 +273,403 @@ function isPendingNotebookAction(action: ChatMessageAction) {
   return !shouldStreamNotebookAction(action);
 }
 
+function normalizeActionReply(value: string) {
+  return (value || "")
+    .toLocaleLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isAffirmativeActionReply(value: string) {
+  const normalized = normalizeActionReply(value);
+  if (!normalized) return false;
+
+  return [
+    "ok",
+    "oke",
+    "okay",
+    "yes",
+    "co",
+    "co nhe",
+    "co ban",
+    "dong y",
+    "duoc",
+    "duoc nhe",
+    "xac nhan",
+    "chap nhan",
+    "lam di",
+    "tao di",
+    "them di",
+    "tiep tuc",
+    "nhat tri",
+    "uh",
+    "u",
+  ].includes(normalized);
+}
+
+function isNegativeActionReply(value: string) {
+  const normalized = normalizeActionReply(value);
+  if (!normalized) return false;
+
+  return [
+    "khong",
+    "ko",
+    "k",
+    "no",
+    "huy",
+    "thoi",
+    "khong can",
+    "bo qua",
+    "dung lai",
+  ].includes(normalized);
+}
+
+function getLatestPendingNotebookAction(
+  session: AIChatSession,
+): ChatMessageAction | null {
+  const messages = session.messages || [];
+
+  for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
+    const actions = messages[messageIndex].actions || [];
+
+    for (let actionIndex = actions.length - 1; actionIndex >= 0; actionIndex -= 1) {
+      const action = actions[actionIndex];
+      if (isPendingNotebookAction(action) && !action.consumed) {
+        return action;
+      }
+    }
+  }
+
+  return null;
+}
+
+function findRequestedNotebookCountMatch(value: string): RegExpMatchArray | null {
+  const text = value || "";
+
+  return (
+    text.match(
+      /\b(\d{1,6})\s*(?:từ\s+vựng|tu\s+vung|từ|tu|kanji|mục|muc|items?|words?)\b/i,
+    ) ||
+    text.match(
+      /\b(?:thêm|them|tạo|tao|sinh|generate|add|make|create)\s+(\d{1,6})\b/i,
+    )
+  );
+}
+
+function parseRequestedNotebookCount(value: string): number | null {
+  const match = findRequestedNotebookCountMatch(value);
+  if (!match) return null;
+
+  const count = Number(match[1]);
+  return Number.isFinite(count) && count > 0 ? count : null;
+}
+
+function buildLimitedNotebookPrompt(
+  prompt: string,
+  limit = MAX_NOTEBOOK_ITEMS_PER_ACTION,
+) {
+  const originalPrompt = (prompt || "").trim();
+  if (!originalPrompt) return `${limit} từ vựng`;
+
+  const countMatch = findRequestedNotebookCountMatch(originalPrompt);
+  if (countMatch?.[1]) {
+    return (
+      originalPrompt.slice(0, countMatch.index) +
+      countMatch[0].replace(countMatch[1], String(limit)) +
+      originalPrompt.slice((countMatch.index || 0) + countMatch[0].length)
+    );
+  }
+
+  return `${limit} từ vựng. ${originalPrompt}`;
+}
+
+function buildNotebookItemsPrompt(notebookName: string, count: number) {
+  const topic = topicFromNotebookName(notebookName) || notebookName;
+  return `${count} từ vựng về ${topic}`;
+}
+
+function cleanNotebookTopic(value: string) {
+  return (value || "")
+    .replace(/[“”"']/g, "")
+    .replace(/\s+/g, " ")
+    .replace(/^(?:về|ve)\s+/i, "")
+    .replace(/\s*(?:nhé|nhe|đi|di|cho tôi|cho mình|của tôi|của mình)\s*$/i, "")
+    .replace(/[.,!?;:]+$/g, "")
+    .trim();
+}
+
+function topicFromNotebookName(notebookName: string) {
+  return cleanNotebookTopic(
+    (notebookName || "")
+      .replace(/^sổ\s*tay\s+/i, "")
+      .replace(/^từ\s+vựng\s+(?:về\s+)?/i, ""),
+  );
+}
+
+function buildNotebookNameFromTopic(topic: string) {
+  const cleanedTopic = cleanNotebookTopic(topic);
+  if (!cleanedTopic) return "Từ vựng mới";
+
+  if (/^(?:từ\s+vựng|kanji|ngữ\s+pháp|sổ\s*tay)\b/i.test(cleanedTopic)) {
+    return cleanedTopic;
+  }
+
+  return `Từ vựng về ${cleanedTopic}`;
+}
+
+function extractRequestedNotebookName(message: string) {
+  const text = (message || "").replace(/\s+/g, " ").trim();
+
+  const quoted =
+    text.match(/sổ\s*tay\s+(?:tên\s*)?["“']([^"”']+)["”']/i) ||
+    text.match(/(?:tên|name)\s+["“']([^"”']+)["”']/i);
+  if (quoted?.[1]) return cleanNotebookTopic(quoted[1]);
+
+  const afterNotebook = text.match(
+    /sổ\s*tay\s+(.+?)(?:\s+(?:và\s+)?(?:thêm|tạo|sinh|generate|add|make|create)\b|\s+với\s+\d|\s+\d{1,6}\s*(?:từ\s+vựng|từ|kanji|mục|items?|words?)|$)/i,
+  );
+  if (afterNotebook?.[1]) {
+    return buildNotebookNameFromTopic(afterNotebook[1]);
+  }
+
+  const topic = text.match(
+    /(?:về|chủ\s*đề)\s+(.+?)(?:\s+(?:và\s+)?(?:thêm|tạo|sinh|generate|add|make|create)\b|\s+\d{1,6}\s*(?:từ\s+vựng|từ|kanji|mục|items?|words?)|$)/i,
+  );
+  if (topic?.[1]) {
+    return buildNotebookNameFromTopic(topic[1]);
+  }
+
+  return "Từ vựng mới";
+}
+
+function parseNotebookCreateRequest(message: string) {
+  const requestedCount = parseRequestedNotebookCount(message);
+  if (!requestedCount) return null;
+
+  const normalized = normalizeActionReply(message);
+  const wantsNotebook = /\bso tay\b/.test(normalized);
+  const wantsCreate = /\b(?:tao|lam|lap|create|make)\b/.test(normalized);
+  const wantsItems =
+    /\b(?:tu vung|kanji|tu|muc|item|items|word|words)\b/.test(normalized);
+
+  if (!wantsNotebook || !wantsCreate || !wantsItems) return null;
+
+  const notebookName = extractRequestedNotebookName(message);
+  const limitedCount = Math.min(requestedCount, MAX_NOTEBOOK_ITEMS_PER_ACTION);
+
+  return {
+    notebookName,
+    requestedCount,
+    limitedCount,
+    prompt: buildNotebookItemsPrompt(notebookName, limitedCount),
+  };
+}
+
+function parseNotebookCreateLimitIntent(
+  message: string,
+): ChatMessageAction | null {
+  const request = parseNotebookCreateRequest(message);
+  if (
+    !request ||
+    request.requestedCount <= MAX_NOTEBOOK_ITEMS_PER_ACTION
+  ) {
+    return null;
+  }
+
+  return {
+    type: "confirm_create_limited_notebook",
+    label: `Tạo ${MAX_NOTEBOOK_ITEMS_PER_ACTION} từ vựng`,
+    notebookName: request.notebookName,
+    prompt: request.prompt,
+    requestedCount: request.requestedCount,
+    limitedCount: MAX_NOTEBOOK_ITEMS_PER_ACTION,
+  };
+}
+
+function parseNotebookCreateImmediateIntent(message: string) {
+  const request = parseNotebookCreateRequest(message);
+  if (
+    !request ||
+    request.requestedCount > MAX_NOTEBOOK_ITEMS_PER_ACTION
+  ) {
+    return null;
+  }
+
+  return {
+    notebookName: request.notebookName,
+    prompt: request.prompt,
+    requestedCount: request.requestedCount,
+  };
+}
+
+function parsePendingCreateCountChange(
+  session: AIChatSession,
+  message: string,
+) {
+  const requestedCount = parseRequestedNotebookCount(message);
+  if (
+    !requestedCount ||
+    requestedCount > MAX_NOTEBOOK_ITEMS_PER_ACTION
+  ) {
+    return null;
+  }
+
+  const normalized = normalizeActionReply(message);
+  const mentionsItems =
+    /\b(?:tu vung|kanji|tu|muc|item|items|word|words)\b/.test(normalized);
+  if (!mentionsItems) return null;
+
+  const pendingAction = getLatestPendingNotebookAction(session);
+  const recoveredAction =
+    pendingAction?.type === "confirm_create_limited_notebook"
+      ? null
+      : recoverCreateLimitActionFromLastAiMessage(session);
+  const notebookName =
+    pendingAction?.type === "confirm_create_limited_notebook"
+      ? pendingAction.notebookName
+      : recoveredAction?.notebookName;
+
+  if (!notebookName) {
+    return null;
+  }
+
+  return {
+    notebookName,
+    prompt: buildNotebookItemsPrompt(notebookName, requestedCount),
+    requestedCount,
+  };
+}
+
+function getLatestNotebookContext(session: AIChatSession) {
+  const messages = session.messages || [];
+
+  for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
+    const actions = messages[messageIndex].actions || [];
+
+    for (let actionIndex = actions.length - 1; actionIndex >= 0; actionIndex -= 1) {
+      const action = actions[actionIndex];
+      if (action.type === "view_notebook" && action.notebookId) {
+        return {
+          notebookId: action.notebookId,
+          notebookName: action.notebookName || "sổ tay đã chọn",
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
+function parseRecentNotebookAddIntent(
+  session: AIChatSession,
+  message: string,
+) {
+  if (parseNotebookCreateRequest(message)) return null;
+
+  const requestedCount = parseRequestedNotebookCount(message);
+  if (
+    !requestedCount ||
+    requestedCount > MAX_NOTEBOOK_ITEMS_PER_ACTION
+  ) {
+    return null;
+  }
+
+  const normalized = normalizeActionReply(message);
+  const mentionsItems =
+    /\b(?:tu vung|kanji|tu|muc|item|items|word|words)\b/.test(normalized);
+  const addIntent =
+    /\b(?:them|bo sung|add|generate|sinh)\b/.test(normalized) ||
+    (/\btao\b/.test(normalized) && /\b(?:them|nua)\b/.test(normalized));
+
+  if (!mentionsItems || !addIntent) return null;
+
+  const notebook = getLatestNotebookContext(session);
+  if (!notebook) return null;
+
+  return {
+    ...notebook,
+    prompt: buildNotebookItemsPrompt(notebook.notebookName, requestedCount),
+    requestedCount,
+  };
+}
+
+function isNotebookMutationIntent(message: string) {
+  const normalized = normalizeActionReply(message);
+  return (
+    normalized.includes("so tay") &&
+    /\b(?:tao|lam|lap|them|create|make|add)\b/.test(normalized)
+  );
+}
+
+function isNotebookPromiseWithoutTool(userMessage: string, aiMessage: string) {
+  if (!isNotebookMutationIntent(userMessage)) return false;
+
+  const normalized = normalizeActionReply(aiMessage);
+  if (!normalized.includes("so tay")) return false;
+
+  return /\b(?:minh se|toi se|dang tao|da tao|da them|se them|tao xong|them xong)\b/.test(
+    normalized,
+  );
+}
+
+function recoverCreateLimitActionFromLastAiMessage(
+  session: AIChatSession,
+): ChatMessageAction | null {
+  const messages = session.messages || [];
+
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.role !== "ai" || !message.content) continue;
+
+    const content = message.content;
+    const normalized = normalizeActionReply(content);
+    const nameMatch = content.match(/sổ\s*tay\s+["“']([^"”']+)["”']/i);
+    if (!nameMatch?.[1]) return null;
+
+    const notebookName = cleanNotebookTopic(nameMatch[1]);
+    const looksLikeLimitQuestion =
+      normalized.includes("ban co muon") &&
+      normalized.includes("toi da") &&
+      normalized.includes(String(MAX_NOTEBOOK_ITEMS_PER_ACTION)) &&
+      normalized.includes("so tay");
+
+    const promisedCreate =
+      normalized.includes("so tay") &&
+      /\b(?:se tao|dang tao|tao)\b/.test(normalized) &&
+      /\b(?:tu vung|kanji|tu|muc|item|items|word|words)\b/.test(normalized);
+    const requestedCount =
+      parseRequestedNotebookCount(content) || MAX_NOTEBOOK_ITEMS_PER_ACTION;
+
+    if (
+      !looksLikeLimitQuestion &&
+      (!promisedCreate ||
+        requestedCount > MAX_NOTEBOOK_ITEMS_PER_ACTION)
+    ) {
+      return null;
+    }
+
+    const limitedCount = Math.min(
+      requestedCount,
+      MAX_NOTEBOOK_ITEMS_PER_ACTION,
+    );
+
+    return {
+      type: "confirm_create_limited_notebook",
+      label: `Tạo ${limitedCount} từ vựng`,
+      notebookName,
+      prompt: buildNotebookItemsPrompt(notebookName, limitedCount),
+      requestedCount,
+      limitedCount,
+    };
+  }
+
+  return null;
+}
+
 @Injectable()
 export class AiChatSessionsService {
   constructor(
@@ -495,6 +893,187 @@ export class AiChatSessionsService {
     return fallback;
   }
 
+  private async appendNotebookCreateLimitConfirmation(
+    session: AIChatSession,
+    content: string,
+    action: ChatMessageAction,
+  ) {
+    this.dismissPendingNotebookActions(session);
+
+    const userMsg: ChatMessage = {
+      role: "user",
+      content,
+      timestamp: new Date(),
+    };
+    const aiMsg: ChatMessage = {
+      role: "ai",
+      content: this.buildPendingNotebookActionMessage([action], ""),
+      timestamp: new Date(),
+      actions: [action],
+    };
+
+    session.messages.push(userMsg);
+    session.messages.push(aiMsg);
+    if (!session.title || session.title === "Cuộc trò chuyện mới") {
+      session.title = this.buildTitleFromMessage(content);
+    }
+    await session.save();
+
+    return {
+      sessionId: session._id,
+      userMessage: userMsg,
+      aiMessage: aiMsg,
+    };
+  }
+
+  private async createNotebookFromParsedRequest(
+    session: AIChatSession,
+    content: string,
+    userId: string,
+    request: {
+      notebookName: string;
+      prompt: string;
+      requestedCount: number;
+    },
+  ) {
+    this.dismissPendingNotebookActions(session);
+
+    const result = await this.aiLangfuseTracing.runChatObservation(
+      {
+        workflow: "notebook-action",
+        userId,
+        sessionId: String(session._id),
+        input: {
+          notebookName: request.notebookName,
+          prompt: request.prompt,
+        },
+      },
+      () =>
+        this.chatAgent.createNotebookFromAction(
+          userId,
+          request.notebookName,
+          request.prompt,
+        ),
+      (response) => ({
+        notebookId: response?.notebookId,
+        notebookName: response?.notebookName,
+        itemsCount: response?.itemsCount,
+        requestedCount: response?.requestedCount,
+        success: response?.success,
+      }),
+    );
+
+    const notebookName = result?.notebookName || request.notebookName;
+    const userMsg: ChatMessage = {
+      role: "user",
+      content,
+      timestamp: new Date(),
+    };
+    const aiMsg: ChatMessage = {
+      role: "ai",
+      content: this.buildNotebookCreateResultMessage(result),
+      timestamp: new Date(),
+      actions: this.buildNotebookViewActions(
+        "Xem sổ tay đã tạo",
+        result,
+        true,
+      ),
+    };
+
+    session.messages.push(userMsg);
+    session.messages.push(aiMsg);
+    if (!session.title || session.title === "Cuộc trò chuyện mới") {
+      session.title = this.buildTitleFromMessage(content);
+    }
+    await session.save();
+
+    return {
+      sessionId: session._id,
+      userMessage: userMsg,
+      aiMessage: aiMsg,
+      result: {
+        ...result,
+        notebookName,
+      },
+    };
+  }
+
+  private async addNotebookItemsFromParsedRequest(
+    session: AIChatSession,
+    content: string,
+    userId: string,
+    request: {
+      notebookId: string;
+      notebookName: string;
+      prompt: string;
+      requestedCount: number;
+    },
+  ) {
+    const result = await this.aiLangfuseTracing.runChatObservation(
+      {
+        workflow: "notebook-action",
+        userId,
+        sessionId: String(session._id),
+        input: {
+          notebookId: request.notebookId,
+          prompt: request.prompt,
+        },
+      },
+      () =>
+        this.chatAgent.addItemsToNotebook(
+          userId,
+          request.notebookId,
+          request.prompt,
+        ),
+      (response) => ({
+        notebookId: response?.notebookId,
+        notebookName: response?.notebookName,
+        itemsCount: response?.itemsCount,
+        requestedCount: response?.requestedCount,
+        success: response?.success,
+      }),
+    );
+
+    const notebookName = result?.notebookName || request.notebookName;
+    const userMsg: ChatMessage = {
+      role: "user",
+      content,
+      timestamp: new Date(),
+    };
+    const aiMsg: ChatMessage = {
+      role: "ai",
+      content: this.buildNotebookAddResultMessage({
+        ...result,
+        notebookName,
+      }),
+      timestamp: new Date(),
+      actions: this.buildNotebookViewActions(
+        "Xem sổ tay đã cập nhật",
+        {
+          ...result,
+          notebookId: request.notebookId,
+          notebookName,
+        },
+        false,
+      ),
+    };
+
+    session.messages.push(userMsg);
+    session.messages.push(aiMsg);
+    await session.save();
+
+    return {
+      sessionId: session._id,
+      userMessage: userMsg,
+      aiMessage: aiMsg,
+      result: {
+        ...result,
+        notebookId: request.notebookId,
+        notebookName,
+      },
+    };
+  }
+
   private consumeNotebookChoiceActions(
     session: AIChatSession,
     prompt: string,
@@ -575,6 +1154,262 @@ export class AiChatSessionsService {
     }
   }
 
+  private consumeSpecificPendingAction(
+    session: AIChatSession,
+    targetAction: ChatMessageAction,
+  ) {
+    let changed = false;
+
+    for (const message of session.messages || []) {
+      if (!Array.isArray(message.actions)) continue;
+
+      message.actions = message.actions.map((action) => {
+        const sameAction =
+          action.type === targetAction.type &&
+          (action.notebookId || "") === (targetAction.notebookId || "") &&
+          (action.notebookName || "") === (targetAction.notebookName || "") &&
+          (action.prompt || "") === (targetAction.prompt || "");
+
+        if (!sameAction || action.consumed) return action;
+
+        changed = true;
+        return { ...action, consumed: true };
+      });
+    }
+
+    if (changed) {
+      session.markModified("messages");
+    }
+  }
+
+  private buildNotebookViewActions(
+    label: string,
+    result: any,
+    includeWhenEmpty = true,
+  ): ChatMessageAction[] {
+    const notebookId = result?.notebookId;
+    const itemsCount = Number(result?.itemsCount || 0);
+
+    if (!notebookId || (!includeWhenEmpty && itemsCount <= 0)) return [];
+
+    return [
+      {
+        type: "view_notebook",
+        label,
+        notebookId: String(notebookId),
+        notebookName: result?.notebookName,
+      },
+    ];
+  }
+
+  private buildPendingSelectionReminder(
+    action: ChatMessageAction,
+  ): ChatMessageAction[] {
+    if (
+      action.type !== "select_notebook_for_add" ||
+      !Array.isArray(action.candidates) ||
+      action.candidates.length === 0
+    ) {
+      return [];
+    }
+
+    return [{ ...action }];
+  }
+
+  private async handlePendingNotebookActionReply(
+    session: AIChatSession,
+    content: string,
+    userId: string,
+  ) {
+    const isConfirmed = isAffirmativeActionReply(content);
+    const isDeclined = isNegativeActionReply(content);
+    if (!isConfirmed && !isDeclined) return null;
+
+    const pendingAction =
+      getLatestPendingNotebookAction(session) ||
+      (isConfirmed ? recoverCreateLimitActionFromLastAiMessage(session) : null);
+    if (!pendingAction) return null;
+
+    const usage = await this.getTodayUsage(userId);
+    const userMsg: ChatMessage = {
+      role: "user",
+      content,
+      timestamp: new Date(),
+    };
+
+    if (isDeclined) {
+      this.consumeSpecificPendingAction(session, pendingAction);
+
+      const aiMsg: ChatMessage = {
+        role: "ai",
+        content: "Được rồi, mình sẽ không thực hiện thao tác này.",
+        timestamp: new Date(),
+        actions: [],
+      };
+
+      session.messages.push(userMsg);
+      session.messages.push(aiMsg);
+      await session.save();
+
+      return {
+        sessionId: session._id,
+        userMessage: userMsg,
+        aiMessage: aiMsg,
+        usage,
+      };
+    }
+
+    if (pendingAction.type === "select_notebook_for_add") {
+      const reminderActions = this.buildPendingSelectionReminder(pendingAction);
+      this.consumeSpecificPendingAction(session, pendingAction);
+
+      const aiMsg: ChatMessage = {
+        role: "ai",
+        content:
+          "Mình cần bạn chọn một sổ tay cụ thể trong danh sách trước khi thêm từ nhé.",
+        timestamp: new Date(),
+        actions: reminderActions,
+      };
+
+      session.messages.push(userMsg);
+      session.messages.push(aiMsg);
+      await session.save();
+
+      return {
+        sessionId: session._id,
+        userMessage: userMsg,
+        aiMessage: aiMsg,
+        usage,
+      };
+    }
+
+    if (
+      (pendingAction.type === "confirm_add_to_notebook" ||
+        pendingAction.type === "confirm_add_limited_to_notebook") &&
+      pendingAction.notebookId &&
+      pendingAction.prompt
+    ) {
+      const result = await this.aiLangfuseTracing.runChatObservation(
+        {
+          workflow: "notebook-action",
+          userId,
+          sessionId: String(session._id),
+          input: {
+            notebookId: pendingAction.notebookId,
+            prompt: pendingAction.prompt,
+          },
+        },
+        () =>
+          this.chatAgent.addItemsToNotebook(
+            userId,
+            pendingAction.notebookId as string,
+            pendingAction.prompt as string,
+          ),
+        (response) => ({
+          notebookId: response?.notebookId,
+          notebookName: response?.notebookName,
+          itemsCount: response?.itemsCount,
+          requestedCount: response?.requestedCount,
+          success: response?.success,
+        }),
+      );
+
+      this.consumeNotebookChoiceActions(
+        session,
+        pendingAction.prompt,
+        pendingAction.notebookId,
+      );
+      session.markModified("messages");
+
+      const aiMsg: ChatMessage = {
+        role: "ai",
+        content: this.buildNotebookAddResultMessage(result),
+        timestamp: new Date(),
+        actions: this.buildNotebookViewActions(
+          "Xem sổ tay đã cập nhật",
+          result,
+          false,
+        ),
+      };
+
+      session.messages.push(userMsg);
+      session.messages.push(aiMsg);
+      await session.save();
+
+      return {
+        sessionId: session._id,
+        userMessage: userMsg,
+        aiMessage: aiMsg,
+        result,
+        usage,
+      };
+    }
+
+    if (
+      pendingAction.type === "confirm_create_limited_notebook" &&
+      pendingAction.notebookName &&
+      pendingAction.prompt
+    ) {
+      const result = await this.aiLangfuseTracing.runChatObservation(
+        {
+          workflow: "notebook-action",
+          userId,
+          sessionId: String(session._id),
+          input: {
+            notebookName: pendingAction.notebookName,
+            prompt: pendingAction.prompt,
+          },
+        },
+        () =>
+          this.chatAgent.createNotebookFromAction(
+            userId,
+            pendingAction.notebookName as string,
+            pendingAction.prompt as string,
+          ),
+        (response) => ({
+          notebookId: response?.notebookId,
+          notebookName: response?.notebookName,
+          itemsCount: response?.itemsCount,
+          requestedCount: response?.requestedCount,
+          success: response?.success,
+        }),
+      );
+
+      const notebookName = result?.notebookName || pendingAction.notebookName;
+      this.consumeNotebookCreateActions(
+        session,
+        pendingAction.prompt,
+        notebookName,
+      );
+      session.markModified("messages");
+
+      const aiMsg: ChatMessage = {
+        role: "ai",
+        content: this.buildNotebookCreateResultMessage(result),
+        timestamp: new Date(),
+        actions: this.buildNotebookViewActions(
+          "Xem sổ tay đã tạo",
+          result,
+          true,
+        ),
+      };
+
+      session.messages.push(userMsg);
+      session.messages.push(aiMsg);
+      await session.save();
+
+      return {
+        sessionId: session._id,
+        userMessage: userMsg,
+        aiMessage: aiMsg,
+        result,
+        usage,
+      };
+    }
+
+    return null;
+  }
+
   private assertSessionOwner(session: AIChatSession, userId: string) {
     if (session.userId?.toString() !== userId) {
       throw new ForbiddenException("You do not own this session");
@@ -609,6 +1444,116 @@ export class AiChatSessionsService {
     const session = await this.aiChatSessionModel.findById(sessionId);
     if (!session) throw new NotFoundException("Session not found");
     this.assertSessionOwner(session, userId);
+
+    const pendingActionResponse = await this.handlePendingNotebookActionReply(
+      session,
+      createMessageDto.content,
+      userId,
+    );
+    if (pendingActionResponse) {
+      return {
+        sessionId: pendingActionResponse.sessionId,
+        userMessage: pendingActionResponse.userMessage.content,
+        aiMessage: pendingActionResponse.aiMessage.content,
+        timestamp: pendingActionResponse.aiMessage.timestamp,
+        actions: pendingActionResponse.aiMessage.actions || [],
+        result: pendingActionResponse.result,
+        usage: pendingActionResponse.usage,
+        notebookActionResolved: true,
+      };
+    }
+
+    const recentNotebookAddRequest = parseRecentNotebookAddIntent(
+      session,
+      createMessageDto.content,
+    );
+    if (recentNotebookAddRequest) {
+      const quota = await this.consumeTodayQuota(userId);
+      if (!quota.allowed) {
+        throw new HttpException(
+          this.buildQuotaExceededPayload(quota.usage),
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      }
+
+      const response = await this.addNotebookItemsFromParsedRequest(
+        session,
+        createMessageDto.content,
+        userId,
+        recentNotebookAddRequest,
+      );
+
+      return {
+        sessionId: response.sessionId,
+        userMessage: response.userMessage.content,
+        aiMessage: response.aiMessage.content,
+        timestamp: response.aiMessage.timestamp,
+        actions: response.aiMessage.actions || [],
+        result: response.result,
+        usage: quota.usage,
+        notebookActionResolved: true,
+      };
+    }
+
+    const createImmediateRequest =
+      parsePendingCreateCountChange(session, createMessageDto.content) ||
+      parseNotebookCreateImmediateIntent(createMessageDto.content);
+    if (createImmediateRequest) {
+      const quota = await this.consumeTodayQuota(userId);
+      if (!quota.allowed) {
+        throw new HttpException(
+          this.buildQuotaExceededPayload(quota.usage),
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      }
+
+      const response = await this.createNotebookFromParsedRequest(
+        session,
+        createMessageDto.content,
+        userId,
+        createImmediateRequest,
+      );
+
+      return {
+        sessionId: response.sessionId,
+        userMessage: response.userMessage.content,
+        aiMessage: response.aiMessage.content,
+        timestamp: response.aiMessage.timestamp,
+        actions: response.aiMessage.actions || [],
+        result: response.result,
+        usage: quota.usage,
+        notebookActionResolved: true,
+      };
+    }
+
+    const createLimitAction = parseNotebookCreateLimitIntent(
+      createMessageDto.content,
+    );
+    if (createLimitAction) {
+      const quota = await this.consumeTodayQuota(userId);
+      if (!quota.allowed) {
+        throw new HttpException(
+          this.buildQuotaExceededPayload(quota.usage),
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      }
+
+      const response = await this.appendNotebookCreateLimitConfirmation(
+        session,
+        createMessageDto.content,
+        createLimitAction,
+      );
+
+      return {
+        sessionId: response.sessionId,
+        userMessage: response.userMessage.content,
+        aiMessage: response.aiMessage.content,
+        timestamp: response.aiMessage.timestamp,
+        actions: response.aiMessage.actions || [],
+        usage: quota.usage,
+        notebookActionPending: true,
+      };
+    }
 
     const fastReply = this.chatAgent.getFastReply(createMessageDto.content);
     if (fastReply) {
@@ -733,6 +1678,152 @@ export class AiChatSessionsService {
     if (!session) throw new NotFoundException("Session not found");
 
     this.assertSessionOwner(session, userId);
+
+    const pendingActionResponse = await this.handlePendingNotebookActionReply(
+      session,
+      createMessageDto.content,
+      userId,
+    );
+    if (pendingActionResponse) {
+      const aiMsg = pendingActionResponse.aiMessage;
+      yield { type: "chunk", text: aiMsg.content };
+      yield {
+        type: "done",
+        sessionId: pendingActionResponse.sessionId,
+        aiMessage: aiMsg.content,
+        timestamp: aiMsg.timestamp,
+        actions: aiMsg.actions || [],
+        result: pendingActionResponse.result,
+        usage: pendingActionResponse.usage,
+        notebookActionResolved: true,
+      };
+      return;
+    }
+
+    const recentNotebookAddRequest = parseRecentNotebookAddIntent(
+      session,
+      createMessageDto.content,
+    );
+    if (recentNotebookAddRequest) {
+      const quota = await this.consumeTodayQuota(userId);
+      if (!quota.allowed) {
+        yield {
+          type: "error",
+          ...this.buildQuotaExceededPayload(quota.usage),
+        };
+        return;
+      }
+
+      yield {
+        type: "progress",
+        stage: "generate_notebook_items",
+        message: `Đang tạo ${recentNotebookAddRequest.requestedCount} từ vựng mới...`,
+        current: 0,
+        total: recentNotebookAddRequest.requestedCount,
+      };
+
+      const response = await this.addNotebookItemsFromParsedRequest(
+        session,
+        createMessageDto.content,
+        userId,
+        recentNotebookAddRequest,
+      );
+      const aiMsg = response.aiMessage;
+
+      yield { type: "chunk", text: aiMsg.content };
+      yield {
+        type: "done",
+        sessionId: response.sessionId,
+        aiMessage: aiMsg.content,
+        timestamp: aiMsg.timestamp,
+        actions: aiMsg.actions || [],
+        result: response.result,
+        usage: quota.usage,
+        notebookActionResolved: true,
+      };
+      return;
+    }
+
+    const createImmediateRequest =
+      parsePendingCreateCountChange(session, createMessageDto.content) ||
+      parseNotebookCreateImmediateIntent(createMessageDto.content);
+    if (createImmediateRequest) {
+      const quota = await this.consumeTodayQuota(userId);
+      if (!quota.allowed) {
+        yield {
+          type: "error",
+          ...this.buildQuotaExceededPayload(quota.usage),
+        };
+        return;
+      }
+
+      yield {
+        type: "progress",
+        stage: "create_notebook",
+        message: `Đang tạo sổ tay "${createImmediateRequest.notebookName}"...`,
+      };
+      yield {
+        type: "progress",
+        stage: "generate_notebook_items",
+        message: `Đang tạo ${createImmediateRequest.requestedCount} từ vựng mới...`,
+        current: 0,
+        total: createImmediateRequest.requestedCount,
+      };
+
+      const response = await this.createNotebookFromParsedRequest(
+        session,
+        createMessageDto.content,
+        userId,
+        createImmediateRequest,
+      );
+      const aiMsg = response.aiMessage;
+
+      yield { type: "chunk", text: aiMsg.content };
+      yield {
+        type: "done",
+        sessionId: response.sessionId,
+        aiMessage: aiMsg.content,
+        timestamp: aiMsg.timestamp,
+        actions: aiMsg.actions || [],
+        result: response.result,
+        usage: quota.usage,
+        notebookActionResolved: true,
+      };
+      return;
+    }
+
+    const createLimitAction = parseNotebookCreateLimitIntent(
+      createMessageDto.content,
+    );
+    if (createLimitAction) {
+      const quota = await this.consumeTodayQuota(userId);
+      if (!quota.allowed) {
+        yield {
+          type: "error",
+          ...this.buildQuotaExceededPayload(quota.usage),
+        };
+        return;
+      }
+
+      const response = await this.appendNotebookCreateLimitConfirmation(
+        session,
+        createMessageDto.content,
+        createLimitAction,
+      );
+      const aiMsg = response.aiMessage;
+
+      yield { type: "chunk", text: aiMsg.content };
+      yield {
+        type: "done",
+        sessionId: response.sessionId,
+        aiMessage: aiMsg.content,
+        timestamp: aiMsg.timestamp,
+        actions: aiMsg.actions || [],
+        usage: quota.usage,
+        notebookActionPending: true,
+      };
+      return;
+    }
 
     const fastReply = this.chatAgent.getFastReply(createMessageDto.content);
     if (fastReply) {
@@ -865,15 +1956,23 @@ export class AiChatSessionsService {
         wasAborted = true;
       }
 
+      const fallbackContent =
+        fullText.trim().length > 0
+          ? fullText
+          : wasAborted
+            ? "Đã dừng phản hồi."
+            : "Xin lỗi, mình chưa có phản hồi phù hợp";
+      const guardedFallbackContent =
+        actions.length === 0 &&
+        isNotebookPromiseWithoutTool(createMessageDto.content, fallbackContent)
+          ? "Mình chưa thực hiện được thao tác tạo/thêm sổ tay vì công cụ chưa chạy. Bạn hãy gửi lại yêu cầu theo dạng: tạo sổ tay [chủ đề] với [số lượng] từ vựng."
+          : fallbackContent;
+
       const aiMsg: ChatMessage = {
         role: "ai",
         content: this.buildPendingNotebookActionMessage(
           actions,
-          fullText.trim().length > 0
-            ? fullText
-            : wasAborted
-              ? "Đã dừng phản hồi."
-              : "Xin lỗi, mình chưa có phản hồi phù hợp",
+          guardedFallbackContent,
         ),
         timestamp: new Date(),
         actions,
@@ -1015,14 +2114,11 @@ export class AiChatSessionsService {
       content: `Xác nhận thêm từ vào sổ tay "${notebookName}".`,
       timestamp: new Date(),
     };
-    const actions: ChatMessageAction[] = [
-      {
-        type: "view_notebook",
-        label: "Xem sổ tay đã cập nhật",
-        notebookId: payload.notebookId,
-        notebookName,
-      },
-    ];
+    const actions: ChatMessageAction[] = this.buildNotebookViewActions(
+      "Xem sổ tay đã cập nhật",
+      result,
+      false,
+    );
     const aiMsg: ChatMessage = {
       role: "ai",
       content: this.buildNotebookAddResultMessage(result),
@@ -1088,14 +2184,11 @@ export class AiChatSessionsService {
       content: `Xác nhận tạo ${result?.requestedCount || 30} từ vựng cho sổ tay "${notebookName}".`,
       timestamp: new Date(),
     };
-    const actions: ChatMessageAction[] = [
-      {
-        type: "view_notebook",
-        label: "Xem sổ tay đã tạo",
-        notebookId: result.notebookId,
-        notebookName,
-      },
-    ];
+    const actions: ChatMessageAction[] = this.buildNotebookViewActions(
+      "Xem sổ tay đã tạo",
+      result,
+      true,
+    );
     const aiMsg: ChatMessage = {
       role: "ai",
       content: this.buildNotebookCreateResultMessage(result),
