@@ -184,6 +184,7 @@ export class JlptWordService {
       const [data, total] = await Promise.all([
         this.jlptWordModel
           .find(query, { word: 1, phonetic: 1, meanings: 1 })
+          .sort({ _id: 1 }) // sort ổn định để phân trang theo tuần không lặp/sót
           .skip(skip)
           .limit(limit)
           .lean(), // lean() giúp lấy plain object thay vì mongoose document
