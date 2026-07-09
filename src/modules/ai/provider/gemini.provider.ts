@@ -1,5 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { VertexAI } from '@google-cloud/vertexai';
+import { configureGoogleApplicationCredentials } from '../../../config/google-credentials';
+
+configureGoogleApplicationCredentials();
 
 
 @Injectable()

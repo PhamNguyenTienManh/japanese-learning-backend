@@ -1,4 +1,5 @@
 import { Global, Module } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 
 @Global()
@@ -6,12 +7,9 @@ import Redis from 'ioredis';
   providers: [
     {
       provide: 'REDIS_CLIENT',
-      useFactory: () => {
-        if (!process.env.REDIS_URL) {
-          throw new Error('REDIS_URL is not defined');
-        }
-
-        return new Redis(process.env.REDIS_URL);
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => {
+        return new Redis(config.getOrThrow<string>('REDIS_URL'));
       },
     },
   ],

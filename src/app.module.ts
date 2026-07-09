@@ -1,7 +1,7 @@
 import { Module } from "@nestjs/common";
 import { MongooseModule } from "@nestjs/mongoose";
 import { APP_GUARD } from "@nestjs/core";
-import { ConfigModule } from "@nestjs/config";
+import { ConfigModule, ConfigService } from "@nestjs/config";
 import { UsersModule } from "./modules/users/users.module";
 import { ProfilesModule } from "./modules/profiles/profiles.module";
 import { TrophiesModule } from "./modules/trophies/trophies.module";
@@ -55,14 +55,23 @@ import { ModerationModule } from "./modules/moderation/moderation.module";
 import { ConversationModule } from "./modules/conversation/conversation.module";
 import { LearningPathModule } from "./modules/learning-path/learning-path.module";
 import { KanaModule } from "./modules/kana/kana.module";
+import { validateEnv } from "./config/env.validation";
+import { HealthController } from "./health.controller";
 
 
 @Module({
   imports: [
     ConfigModule.forRoot({
-      isGlobal: true, // biến môi trường có thể dùng toàn cục
+      isGlobal: true,
+      validate: validateEnv,
     }),
-    MongooseModule.forRoot(process.env.MONGO_URI as string),
+    MongooseModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        uri: config.getOrThrow<string>("MONGO_URI"),
+      }),
+    }),
     UsersModule,
     ProfilesModule,
     TrophiesModule,
@@ -111,17 +120,16 @@ import { KanaModule } from "./modules/kana/kana.module";
     KanaModule,
 
     CacheModule.registerAsync({
-      useFactory: async () => {
-        if (!process.env.REDIS_URL) {
-          throw new Error('REDIS_URL is not defined');
-        }
+      inject: [ConfigService],
+      useFactory: async (config: ConfigService) => {
+        const redisUrl = config.getOrThrow<string>("REDIS_URL");
 
         return {
           stores: [
             new Keyv({
               store: new KeyvAdapter(
                 await redisStore({
-                  url: process.env.REDIS_URL,
+                  url: redisUrl,
                 }),
               ),
             }),
@@ -133,6 +141,7 @@ import { KanaModule } from "./modules/kana/kana.module";
     }),
 
   ],
+  controllers: [HealthController],
   providers: [
     // Đăng ký guard toàn cục
     {

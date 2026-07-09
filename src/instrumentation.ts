@@ -1,9 +1,11 @@
 import * as dotenv from "dotenv";
+import { Logger } from "@nestjs/common";
 import { NodeSDK } from "@opentelemetry/sdk-node";
 import { LangfuseSpanProcessor } from "@langfuse/otel";
 
 dotenv.config();
 
+const logger = new Logger("Langfuse");
 const hasLangfuseCredentials =
   !!process.env.LANGFUSE_PUBLIC_KEY && !!process.env.LANGFUSE_SECRET_KEY;
 const langfuseBaseUrl =
@@ -30,11 +32,11 @@ if (hasLangfuseCredentials) {
   void langfuseSdk.start();
 }
 
-console.log(
-  `[Langfuse] tracing ${hasLangfuseCredentials ? "enabled" : "disabled"} baseUrl=${langfuseBaseUrl}`,
+logger.log(
+  `tracing ${hasLangfuseCredentials ? "enabled" : "disabled"} baseUrl=${langfuseBaseUrl}`,
 );
 if (hasLangfuseCredentials && isLangfuseDebugEnabled()) {
-  console.log("[Langfuse] debug exporter logging requested by environment");
+  logger.debug("debug exporter logging requested by environment");
 }
 
 export async function shutdownLangfuseTracing() {
@@ -44,11 +46,11 @@ export async function shutdownLangfuseTracing() {
       .shutdown()
       .then(() => {
         if (isLangfuseDebugEnabled()) {
-          console.log("[Langfuse] tracing shutdown completed");
+          logger.debug("tracing shutdown completed");
         }
       })
       .catch((error) => {
-        console.warn("[Langfuse] tracing shutdown failed", error);
+        logger.warn("tracing shutdown failed", error?.stack || error);
       });
   }
 
