@@ -8,8 +8,10 @@ import type {
   GenerativeModelPreview,
 } from "@google-cloud/vertexai";
 import * as dotenv from "dotenv";
+import { configureGoogleApplicationCredentials } from "../../../config/google-credentials";
 
 dotenv.config();
+configureGoogleApplicationCredentials();
 
 @Injectable()
 export class GoogleGenAIClient {

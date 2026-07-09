@@ -24,9 +24,10 @@ export interface DialogueVoiceLine {
 
 @Injectable()
 export class TextToSpeechService {
-  private readonly VOICEVOX_URL = 'http://127.0.0.1:50021';
+  private readonly voicevoxUrl: string;
 
   constructor(private config: ConfigService) {
+    this.voicevoxUrl = this.config.get<string>('VOICEVOX_URL') || 'http://127.0.0.1:50021';
     ffmpeg.setFfmpegPath(ffmpegInstaller.path);
   }
 
@@ -56,7 +57,7 @@ export class TextToSpeechService {
 
   private async synthesizeToFile(text: string, speaker: number, outputPath: string): Promise<any> {
     const queryRes = await fetch(
-      `${this.VOICEVOX_URL}/audio_query?text=${encodeURIComponent(text)}&speaker=${speaker}`,
+      `${this.voicevoxUrl}/audio_query?text=${encodeURIComponent(text)}&speaker=${speaker}`,
       { method: 'POST' },
     );
 
@@ -65,7 +66,7 @@ export class TextToSpeechService {
     }
 
     const queryData: any = await queryRes.json();
-    const synthRes = await fetch(`${this.VOICEVOX_URL}/synthesis?speaker=${speaker}`, {
+    const synthRes = await fetch(`${this.voicevoxUrl}/synthesis?speaker=${speaker}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(queryData),
@@ -82,7 +83,7 @@ export class TextToSpeechService {
   }
 
   async getSpeakers(): Promise<any[]> {
-    const response = await fetch(`${this.VOICEVOX_URL}/speakers`);
+    const response = await fetch(`${this.voicevoxUrl}/speakers`);
     if (!response.ok) {
       throw new Error(`VOICEVOX speakers failed: ${response.statusText}`);
     }
@@ -217,7 +218,7 @@ export class TextToSpeechService {
         const sentence = sentences[i];
 
         const queryRes = await fetch(
-          `${this.VOICEVOX_URL}/audio_query?text=${encodeURIComponent(sentence)}&speaker=${speaker}`,
+          `${this.voicevoxUrl}/audio_query?text=${encodeURIComponent(sentence)}&speaker=${speaker}`,
           { method: 'POST' },
         );
         const queryData: any = await queryRes.json();
@@ -250,7 +251,7 @@ export class TextToSpeechService {
       currentTime = end + (silentDuration / speedRate);
       ////
 
-        const synthRes = await fetch(`${this.VOICEVOX_URL}/synthesis?speaker=${speaker}`, {
+        const synthRes = await fetch(`${this.voicevoxUrl}/synthesis?speaker=${speaker}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(queryData),
@@ -351,12 +352,12 @@ export class TextToSpeechService {
   async generateVoice(text: string, speaker = 6): Promise<Buffer> {
     try {
       const queryRes = await fetch(
-        `${this.VOICEVOX_URL}/audio_query?text=${encodeURIComponent(text)}&speaker=${speaker}`,
+        `${this.voicevoxUrl}/audio_query?text=${encodeURIComponent(text)}&speaker=${speaker}`,
         { method: 'POST' },
       );
       const queryData = await queryRes.json();
 
-      const synthRes = await fetch(`${this.VOICEVOX_URL}/synthesis?speaker=${speaker}`, {
+      const synthRes = await fetch(`${this.voicevoxUrl}/synthesis?speaker=${speaker}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(queryData),

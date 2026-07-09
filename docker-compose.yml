@@ -1,0 +1,38 @@
+# Local development only.
+# Do not use this compose file for Railway/production; Railway should run the backend Dockerfile directly.
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: javi-local-redis
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis-data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  voicevox:
+    image: voicevox/voicevox_engine:cpu-latest
+    container_name: javi-local-voicevox
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:50021:50021"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:50021/version', timeout=3)\"",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  redis-data:

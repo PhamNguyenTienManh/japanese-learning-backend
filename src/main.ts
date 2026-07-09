@@ -3,11 +3,23 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
-import { ValidationPipe } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import * as bodyParser from 'body-parser';
+
+function parseCorsOrigins(frontendUrl: string) {
+  return frontendUrl
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+}
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  const config = app.get(ConfigService);
+  const logger = new Logger('Bootstrap');
+  const port = config.get<number>('PORT', 9090);
+  const corsOrigins = parseCorsOrigins(config.getOrThrow<string>('FRONTEND_URL'));
 
   // Stripe webhook cần raw body để verify chữ ký — phải mount TRƯỚC json parser
   // và dùng path đầy đủ kể cả global prefix.
@@ -22,7 +34,7 @@ async function bootstrap() {
   app.setGlobalPrefix('api');
   
   app.enableCors({
-    origin: process.env.FRONTEND_URL,
+    origin: corsOrigins.length === 1 ? corsOrigins[0] : corsOrigins,
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     credentials: true, 
   });
@@ -32,14 +44,19 @@ async function bootstrap() {
   app.useGlobalPipes(new ValidationPipe({
     whitelist: true,
   }));
-  app.enableShutdownHooks();
-  process.once("SIGTERM", () => {
-    void shutdownLangfuseTracing();
+  app.enableShutdownHooks(['SIGINT', 'SIGTERM']);
+  const shutdownTracing = async (signal: NodeJS.Signals) => {
+    logger.log(`${signal} received, flushing tracing before shutdown`);
+    await shutdownLangfuseTracing();
+  };
+  process.once('SIGTERM', () => {
+    void shutdownTracing('SIGTERM');
   });
-  process.once("SIGINT", () => {
-    void shutdownLangfuseTracing();
+  process.once('SIGINT', () => {
+    void shutdownTracing('SIGINT');
   });
-  console.log("TEST ENV FFMPEG:", process.env.FFMPEG_PATH);
-  await app.listen(process.env.PORT ?? 9090);
+
+  await app.listen(port);
+  logger.log(`Application is running on port ${port}`);
 }
 bootstrap();

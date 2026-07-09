@@ -12,6 +12,8 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { UploadService } from './upload.service';
 import { Public } from '../auth/public.decorator';
 
+const IMAGE_UPLOAD_LIMIT_BYTES = 5 * 1024 * 1024;
+
 @Controller('upload')
 export class UploadController {
   constructor(private readonly uploadService: UploadService) {}
@@ -19,7 +21,9 @@ export class UploadController {
  
   @Public()
   @Post('image')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(FileInterceptor('file', {
+    limits: { fileSize: IMAGE_UPLOAD_LIMIT_BYTES },
+  }))
   async uploadImage(@UploadedFile() file: Express.Multer.File) {
     if (!file) {
       throw new BadRequestException('File is required');
@@ -44,7 +48,9 @@ export class UploadController {
 
   @Public()
   @Post('update-image')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(FileInterceptor('file', {
+    limits: { fileSize: IMAGE_UPLOAD_LIMIT_BYTES },
+  }))
   async updateImage(
     @UploadedFile() file: Express.Multer.File,
     @Body('oldPublicId') oldPublicId?: string,

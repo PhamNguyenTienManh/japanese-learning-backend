@@ -10,6 +10,7 @@ import * as Handlebars from "handlebars";
 import { Model } from "mongoose";
 import * as path from "path";
 import * as puppeteer from "puppeteer";
+import { ConfigService } from "@nestjs/config";
 import { KanjiStroke } from "./schemas/kanji-stroke.schema";
 
 @Injectable()
@@ -23,13 +24,16 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
 
   constructor(
     @InjectModel(KanjiStroke.name)
-    private readonly kanjiStrokeModel: Model<KanjiStroke>
+    private readonly kanjiStrokeModel: Model<KanjiStroke>,
+    private readonly config: ConfigService,
   ) {}
 
   async onModuleInit() {
     // Khởi động browser 1 lần duy nhất
+    const executablePath = this.config.get<string>("PUPPETEER_EXECUTABLE_PATH");
     this.browser = await puppeteer.launch({
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      executablePath,
+      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
       headless: true,
     });
     this.logger.log("Puppeteer browser started");
