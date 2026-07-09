@@ -47,6 +47,7 @@ const envSchema = z
     GOOGLE_TRANSLATE_KEY: optionalString,
     GOOGLE_APPLICATION_CREDENTIALS: optionalString,
     GOOGLE_APPLICATION_CREDENTIALS_JSON: optionalString,
+    GOOGLE_APPLICATION_CREDENTIALS_BASE64: optionalString,
     GOOGLE_CLOUD_PROJECT: optionalString,
     GOOGLE_CLOUD_LOCATION: optionalString.default("us-central1"),
     VOICEVOX_URL: optionalUrl.default("http://127.0.0.1:50021"),

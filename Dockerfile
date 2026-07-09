@@ -43,6 +43,9 @@ RUN apk add --no-cache \
     ca-certificates \
     chromium \
     dumb-init \
+    font-noto \
+    font-noto-cjk \
+    fontconfig \
     freetype \
     harfbuzz \
     nss \

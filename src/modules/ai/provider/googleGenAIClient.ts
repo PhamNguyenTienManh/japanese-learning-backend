@@ -36,7 +36,7 @@ export class GoogleGenAIClient {
     }
     if (!credentials) {
       this.logger.warn(
-        "[AI] Missing GOOGLE_APPLICATION_CREDENTIALS env var (path to service account JSON)",
+        "[AI] Missing Google credentials env var (set GOOGLE_APPLICATION_CREDENTIALS_JSON or GOOGLE_APPLICATION_CREDENTIALS_BASE64 on Railway)",
       );
     }
 

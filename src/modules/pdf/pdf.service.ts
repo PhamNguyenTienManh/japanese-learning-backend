@@ -38,11 +38,18 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
     });
     this.logger.log("Puppeteer browser started");
 
-    // Load font 1 lần, cache lại — không fetch internet mỗi request nữa
+    // Load font 1 lần, cache lại. Nếu file local bị lỗi/không phải font thật
+    // thì bỏ qua để Chromium fallback sang font hệ thống trong Docker.
     const fontPath = path.join(process.cwd(), "assets", "fonts", "NotoSansJP.woff2");
     if (await fs.pathExists(fontPath)) {
-      this.fontBase64 = await fs.readFile(fontPath, "base64");
-      this.logger.log("Font NotoSansJP loaded from local");
+      const fontBuffer = await fs.readFile(fontPath);
+      if (this.isValidWoff2(fontBuffer)) {
+        this.fontBase64 = fontBuffer.toString("base64");
+        this.logger.log("Font NotoSansJP loaded from local");
+      } else {
+        this.logger.warn("Font NotoSansJP is invalid, will fallback to system font");
+        this.fontBase64 = "";
+      }
     } else {
       this.logger.warn("Font NotoSansJP not found, will fallback to system font");
       this.fontBase64 = "";
@@ -65,6 +72,10 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
     const tpl = Handlebars.compile(content);
     this.templatesCache.set(name, tpl);
     return tpl;
+  }
+
+  private isValidWoff2(buffer: Buffer) {
+    return buffer.length > 4 && buffer.subarray(0, 4).toString("ascii") === "wOF2";
   }
 
   private parseStrokeSteps(svgContent: string | null, char: string): string[] {
