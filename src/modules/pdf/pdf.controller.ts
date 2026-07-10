@@ -29,6 +29,7 @@ export class PdfController {
     @Query("limit") limitStr: string,
     @Query("level") level: string,
     @Query("type") type: "word" | "kanji" = "word",
+    @Query("item") item: string,
     @Req() req: any,
     @Res() res: Response
   ) {
@@ -39,13 +40,16 @@ export class PdfController {
       type === "word" ? this.jlptWordService : this.jlptKanjiService;
 
     try {
-      const pdfBuffer = await this.pdfService.generateJlptPdfFromPage(
-        service,
-        page,
-        limit,
-        level,
-        type
-      );
+      const targetItem = String(item || "").trim();
+      const pdfBuffer = targetItem
+        ? await this.generateSingleJlptPdf(targetItem, type)
+        : await this.pdfService.generateJlptPdfFromPage(
+            service,
+            page,
+            limit,
+            level,
+            type
+          );
 
       if (req.user?.sub && type === "kanji") {
         await this.learningPathService.recordResourceProgress(
@@ -53,15 +57,23 @@ export class PdfController {
           "writing",
           {
             level,
-            refKey: `pdf:kanji:${level || "all"}:${page}:${limit}`,
-            metadata: { page, limit, type },
+            refKey: targetItem
+              ? `pdf:kanji:${level || "all"}:${targetItem}`
+              : `pdf:kanji:${level || "all"}:${page}:${limit}`,
+            metadata: targetItem
+              ? { item: targetItem, type }
+              : { page, limit, type },
           }
         );
       }
 
+      const filenameSuffix = targetItem
+        ? this.toSafeFilename(targetItem)
+        : `page_${page}`;
+
       res.set({
         "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="jlpt_${type}_page_${page}.pdf"`,
+        "Content-Disposition": `attachment; filename="jlpt_${type}_${filenameSuffix}.pdf"`,
         "Content-Length": pdfBuffer.length,
       });
 
@@ -69,5 +81,45 @@ export class PdfController {
     } catch (err) {
       throw new BadRequestException("Failed to generate PDF: " + err.message);
     }
+  }
+
+  private async generateSingleJlptPdf(
+    item: string,
+    type: "word" | "kanji"
+  ) {
+    if (type === "word") {
+      const word = await this.jlptWordService.getDetailWord(item);
+      return this.pdfService.generateJlptPdfFromWords([
+        {
+          word: word.word,
+          phonetic: Array.isArray(word.phonetic)
+            ? word.phonetic.join(" ")
+            : word.phonetic || "",
+          meanings: Array.isArray(word.meanings)
+            ? word.meanings
+                .map((meaning) =>
+                  typeof meaning === "string" ? meaning : meaning?.meaning
+                )
+                .filter(Boolean)
+                .join(", ")
+            : word.meanings || "",
+        },
+      ]);
+    }
+
+    const kanji = await this.jlptKanjiService.getDetailKanji(item);
+    return this.pdfService.generateJlptPdfFromWords([
+      {
+        word: kanji.kanji,
+        phonetic: [kanji.kun, kanji.on].filter(Boolean).join(" "),
+        meanings: kanji.mean || "",
+      },
+    ]);
+  }
+
+  private toSafeFilename(value: string) {
+    return encodeURIComponent(value)
+      .replace(/%/g, "")
+      .slice(0, 60) || "item";
   }
 }

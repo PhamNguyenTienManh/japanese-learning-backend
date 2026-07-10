@@ -112,16 +112,18 @@
     </div>
   </div>
   <!-- HÀNG 2: Phiên âm + chữ mờ -->
-  <div class="row">
-    <div class="left-cell text-info">{{this.phonetic}}</div>
-    <div class="grid-container">
-      {{#each this.practiceBoxes}}
-        <div class="grid-cell">
-          <div class="grid-content practice-char">{{../firstChar}}</div>
-        </div>
-      {{/each}}
+  {{#each this.practiceRows}}
+    <div class="row">
+      <div class="left-cell text-info">{{this.label}}</div>
+      <div class="grid-container">
+        {{#each ../practiceBoxes}}
+          <div class="grid-cell">
+            <div class="grid-content practice-char">{{../../firstChar}}</div>
+          </div>
+        {{/each}}
+      </div>
     </div>
-  </div>
+  {{/each}}
   <!-- HÀNG 3: Nghĩa + ô trống -->
   <div class="row">
     <div class="left-cell text-info">{{this.meanings}}</div>
