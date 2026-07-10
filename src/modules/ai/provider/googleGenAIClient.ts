@@ -53,6 +53,7 @@ export class GoogleGenAIClient {
       temperature,
       maxRetries,
       streaming: true,
+      authOptions: project ? { projectId: project } : undefined,
       location,
     });
   }
