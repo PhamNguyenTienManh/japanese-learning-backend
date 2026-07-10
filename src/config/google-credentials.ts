@@ -6,7 +6,14 @@ import * as path from "path";
 const logger = new Logger("GoogleCredentials");
 
 export function configureGoogleApplicationCredentials() {
-  if (process.env.GOOGLE_APPLICATION_CREDENTIALS) return;
+  const configuredCredentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+  if (configuredCredentialsPath) {
+    if (fs.existsSync(configuredCredentialsPath)) return;
+
+    logger.warn(
+      "GOOGLE_APPLICATION_CREDENTIALS is set, but the file does not exist; trying inline Google credentials env instead",
+    );
+  }
 
   const credentialsJson =
     process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON ||
