@@ -167,20 +167,25 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
+    const practiceRowCount = words.length === 1 ? 9 : 1;
     const enriched = words.map((w, index) => {
       const firstChar = firstChars[index];
       const strokeSvg = firstChar ? this.svgCache.get(firstChar) ?? null : null;
       const strokeSteps = this.parseStrokeSteps(strokeSvg, firstChar);
       const practiceCount = Math.max(1, 20 - strokeSteps.length);
       const practiceBoxes = Array(practiceCount).fill(null);
+      const phonetic = this.limitReadingsForPdf(w.phonetic);
 
       return {
         word: w.word,
         firstChar,
-        phonetic: this.limitReadingsForPdf(w.phonetic),
+        phonetic,
         meanings: this.limitMeaningsForPdf(w.meanings),
         strokeSteps,
         practiceBoxes,
+        practiceRows: Array.from({ length: practiceRowCount }, (_, rowIndex) => ({
+          label: rowIndex === 0 ? phonetic : "",
+        })),
       };
     });
 
