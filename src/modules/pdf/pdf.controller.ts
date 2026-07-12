@@ -1,6 +1,8 @@
 import {
   Controller,
+  Body,
   Get,
+  Post,
   Query,
   Req,
   Res,
@@ -83,6 +85,73 @@ export class PdfController {
     }
   }
 
+  @Post("jlpt/custom")
+  @Public()
+  async downloadCustomJlptPdf(
+    @Body() body: {
+      type?: "word" | "kanji";
+      level?: string;
+      items?: { value?: string; traceRows?: number; blankRows?: number }[];
+    },
+    @Req() req: any,
+    @Res() res: Response
+  ) {
+    const type = body?.type === "kanji" ? "kanji" : "word";
+    const items = Array.isArray(body?.items) ? body.items : [];
+    if (!items.length || items.length > 50) {
+      throw new BadRequestException("PDF must contain between 1 and 50 items");
+    }
+
+    try {
+      const words = await Promise.all(items.map(async (item) => {
+        const value = String(item?.value || "").trim();
+        if (!value) throw new Error("Item value is required");
+
+        const traceRows = this.clampRows(item.traceRows, 1);
+        const blankRows = this.clampRows(item.blankRows, 1);
+        if (type === "word") {
+          const word = await this.jlptWordService.getDetailWord(value);
+          return {
+            word: word.word,
+            phonetic: Array.isArray(word.phonetic) ? word.phonetic.join(" ") : word.phonetic || "",
+            meanings: Array.isArray(word.meanings)
+              ? word.meanings.map((meaning) => typeof meaning === "string" ? meaning : meaning?.meaning).filter(Boolean).join(", ")
+              : word.meanings || "",
+            traceRows,
+            blankRows,
+          };
+        }
+
+        const kanji = await this.jlptKanjiService.getDetailKanji(value);
+        return {
+          word: kanji.kanji,
+          phonetic: [kanji.kun, kanji.on].filter(Boolean).join(" "),
+          meanings: kanji.mean || "",
+          traceRows,
+          blankRows,
+        };
+      }));
+
+      const pdfBuffer = await this.pdfService.generateJlptPdfFromWords(words);
+      if (req.user?.sub && type === "kanji") {
+        await this.learningPathService.recordResourceProgress(req.user.sub, "writing", {
+          level: body.level,
+          refKey: `pdf:kanji:${body.level || "all"}:custom`,
+          metadata: { type, itemCount: items.length },
+        });
+      }
+
+      res.set({
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="jlpt_${type}_custom.pdf"`,
+        "Content-Length": pdfBuffer.length,
+      });
+      res.send(pdfBuffer);
+    } catch (err) {
+      throw new BadRequestException("Failed to generate PDF: " + err.message);
+    }
+  }
+
   private async generateSingleJlptPdf(
     item: string,
     type: "word" | "kanji"
@@ -121,5 +190,10 @@ export class PdfController {
     return encodeURIComponent(value)
       .replace(/%/g, "")
       .slice(0, 60) || "item";
+  }
+
+  private clampRows(value: number | undefined, fallback: number) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? Math.min(10, Math.max(0, Math.floor(parsed))) : fallback;
   }
 }
