@@ -171,6 +171,18 @@ export class AuthService {
     return user.save();
   }
 
+  private canUsePasswordAuth(user: Pick<User, "provider" | "passwordHash">) {
+    return user.provider === "local" && !!user.passwordHash;
+  }
+
+  private getPasswordAuthDisabledMessage(user: Pick<User, "provider">) {
+    if (user.provider === "google") {
+      return "Tài khoản này đăng nhập bằng Google nên không thể dùng chức năng mật khẩu tại đây. Vui lòng đăng nhập bằng Google.";
+    }
+
+    return "Tài khoản này không hỗ trợ đăng nhập bằng mật khẩu.";
+  }
+
   async register(dto: RegisterDto) {
     const { email, username, password } = dto;
 
@@ -245,6 +257,10 @@ export class AuthService {
       throw new UnauthorizedException("Không tìm thấy tài khoản này!");
     }
 
+    if (!this.canUsePasswordAuth(user)) {
+      throw new UnauthorizedException(this.getPasswordAuthDisabledMessage(user));
+    }
+
     const isMatch = await bcrypt.compare(password, user.passwordHash);
 
     if (!isMatch) {
@@ -258,6 +274,10 @@ export class AuthService {
   async forgotPassword(dto: ForgotPasswordDto) {
     const user = await this.usersService.findByEmail(dto.email);
     if (!user) throw new NotFoundException("Không tìm thấy email này");
+
+    if (!this.canUsePasswordAuth(user)) {
+      throw new BadRequestException(this.getPasswordAuthDisabledMessage(user));
+    }
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     await this.cacheManager.set(`otp_${dto.email}`, otp, 5 * 60 * 1000);
@@ -275,6 +295,11 @@ export class AuthService {
     const user = await this.usersService.findByEmail(dto.email);
     if (!user) throw new NotFoundException("Không tìm thấy người dùng");
 
+    if (!this.canUsePasswordAuth(user)) {
+      await this.cacheManager.del(`otp_${dto.email}`);
+      throw new BadRequestException(this.getPasswordAuthDisabledMessage(user));
+    }
+
     const newHash = await bcrypt.hash(dto.password, 10);
     user.passwordHash = newHash;
     await user.save();
@@ -290,10 +315,8 @@ export class AuthService {
       throw new NotFoundException("Không tìm thấy người dùng");
     }
 
-    if (user.provider === "google" || !user.passwordHash) {
-      throw new BadRequestException(
-        "Tài khoản của bạn đang liên kết qua Google, không thể đổi mật khẩu tại đây",
-      );
+    if (!this.canUsePasswordAuth(user)) {
+      throw new BadRequestException(this.getPasswordAuthDisabledMessage(user));
     }
 
     const isMatch = await bcrypt.compare(dto.currentPassword, user.passwordHash);
