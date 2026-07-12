@@ -239,19 +239,54 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
     }
 
     const days = METRIC_RANGE_DAYS[range];
-    const filter: Record<string, unknown> = {};
+    const filter: Record<string, unknown> = {
+      reviewDecision: { $in: ["confirmed_violation", "rejected_violation"] },
+      reviewedAt: { $ne: null },
+    };
     if (days) {
       const from = new Date();
       from.setUTCDate(from.getUTCDate() - days);
-      filter.createdAt = { $gte: from };
+      filter.reviewedAt = { $gte: from };
     }
 
     const evaluations = await this.moderationAiEvaluationModel
       .find(filter)
-      .select("isViolation confidence decisionStatus reviewDecision createdAt")
+      .select("targetType isViolation confidence decisionStatus reviewDecision moderationCaseId createdAt reviewedAt")
       .lean();
+    const reviewedEvaluationCaseIds = new Set(
+      evaluations
+        .map((item) => item.moderationCaseId)
+        .filter(Boolean)
+        .map((id) => String(id)),
+    );
 
-    const counts = evaluations.reduce(
+    const caseFilter: Record<string, unknown> = {
+      source: "ai",
+      status: { $in: ["approved_deleted", "dismissed", "restored"] },
+      actionAt: days
+        ? { $gte: (filter.reviewedAt as Record<string, Date>).$gte }
+        : { $ne: null },
+    };
+    const reviewedCases = await this.moderationCaseModel
+      .find(caseFilter)
+      .select("targetType confidence status reviewDecision actionAt")
+      .lean();
+    const caseEvaluations = reviewedCases
+      .filter((item) => !reviewedEvaluationCaseIds.has(String(item._id)))
+      .map((item) => ({
+        targetType: item.targetType,
+        isViolation: true,
+        confidence: item.confidence,
+        reviewDecision:
+          item.reviewDecision || this.getReviewDecisionFromCaseStatus(item.status),
+        createdAt: item.actionAt,
+        reviewedAt: item.actionAt,
+      }))
+      .filter((item) => item.reviewDecision);
+
+    const metricItems = [...evaluations, ...caseEvaluations];
+
+    const counts = metricItems.reduce(
       (acc, item) => {
         const label = this.getEvaluationLabel(item);
         if (label === "tp") acc.tp += 1;
@@ -270,8 +305,8 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
         evaluated: counts.tp + counts.fp + counts.fn,
       },
       scores: this.calculateScores(counts.tp, counts.fp, counts.fn),
-      curve: this.getPrecisionRecallThresholds(evaluations).map((threshold) =>
-        this.calculatePrecisionRecallPoint(evaluations, threshold),
+      curve: this.getPrecisionRecallThresholds(metricItems).map((threshold) =>
+        this.calculatePrecisionRecallPoint(metricItems, threshold),
       ),
     };
   }
@@ -285,15 +320,15 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
     item.status = "approved_deleted";
     item.actionAt = actionAt;
     item.actionBy = adminId ? new Types.ObjectId(adminId) : null;
-    if (this.isAiPostCase(item)) {
+    if (this.isAiCase(item)) {
       item.reviewDecision = "confirmed_violation";
     }
     const saved = await item.save();
-    if (this.isAiPostCase(saved)) {
+    if (this.isAiCase(saved)) {
       await this.syncAiEvaluationReview(saved, "confirmed_violation", actionAt);
     }
-    if (saved.source === "user_report" && saved.targetType === "post") {
-      await this.markApprovedPostFalseNegative(saved, actionAt);
+    if (saved.source === "user_report") {
+      await this.markApprovedFalseNegative(saved, actionAt);
     }
     await this.notifyReportApprovedDeleted(saved);
     return saved;
@@ -591,7 +626,7 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
 
     await this.softDeleteTarget("post", targetObjectId, adminObjectId);
     const saved = await item.save();
-    await this.markApprovedPostFalseNegative(saved, actionAt);
+    await this.markApprovedFalseNegative(saved, actionAt);
     await this.notifyReportApprovedDeleted(saved);
     return saved;
   }
@@ -679,11 +714,13 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
     item.reportCount = item.userReports.length;
     item.status = "approved_deleted";
     item.initialStatus = item.initialStatus || "pending";
+    item.reviewDecision = "confirmed_violation";
     item.actionAt = actionAt;
     item.actionBy = adminObjectId;
 
     await this.softDeleteTarget("comment", targetObjectId, adminObjectId);
     const saved = await item.save();
+    await this.markApprovedFalseNegative(saved, actionAt);
     await this.notifyReportApprovedDeleted(saved);
     return saved;
   }
@@ -717,11 +754,11 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
     item.status = "restored";
     item.actionAt = actionAt;
     item.actionBy = adminId ? new Types.ObjectId(adminId) : null;
-    if (this.isAiPostCase(item)) {
+    if (this.isAiCase(item)) {
       item.reviewDecision = "rejected_violation";
     }
     const saved = await item.save();
-    if (this.isAiPostCase(saved)) {
+    if (this.isAiCase(saved)) {
       await this.syncAiEvaluationReview(saved, "rejected_violation", actionAt);
     }
     return saved;
@@ -836,14 +873,13 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
       moderationCaseId?: Types.ObjectId | null;
     },
   ) {
-    if (target.targetType !== "post") return null;
-
     const targetId = new Types.ObjectId(target.targetId);
     const existing = input.moderationCaseId
       ? await this.moderationAiEvaluationModel.findOne({
           moderationCaseId: input.moderationCaseId,
         })
       : await this.moderationAiEvaluationModel.findOne({
+          targetType: target.targetType,
           targetId,
           isViolation: false,
           decisionStatus: "approved",
@@ -852,6 +888,7 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
 
     return this.moderationAiEvaluationModel.create({
       targetId,
+      targetType: target.targetType,
       isViolation: input.isViolation,
       category: input.category || null,
       confidence: this.clampConfidence(input.confidence),
@@ -864,18 +901,28 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  private isAiPostCase(item: Pick<ModerationCase, "source" | "targetType">) {
-    return item.source === "ai" && item.targetType === "post";
+  private isAiCase(item: Pick<ModerationCase, "source">) {
+    return item.source === "ai";
   }
 
   private getDismissReviewDecision(
     item: Pick<ModerationCase, "source" | "targetType" | "status" | "initialStatus">,
   ): ModerationReviewDecision | null {
-    if (!this.isAiPostCase(item)) return null;
+    if (!this.isAiCase(item)) return null;
     const initialStatus = item.initialStatus || item.status;
     return initialStatus === "auto_deleted"
       ? "confirmed_violation"
       : "rejected_violation";
+  }
+
+  private getReviewDecisionFromCaseStatus(
+    status?: ModerationStatus,
+  ): ModerationReviewDecision | null {
+    if (status === "approved_deleted") return "confirmed_violation";
+    if (status === "dismissed" || status === "restored") {
+      return "rejected_violation";
+    }
+    return null;
   }
 
   private async syncAiEvaluationReview(
@@ -898,12 +945,13 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  private async markApprovedPostFalseNegative(
+  private async markApprovedFalseNegative(
     item: ModerationCase,
     reviewedAt: Date,
   ) {
     await this.moderationAiEvaluationModel.updateMany(
       {
+        targetType: item.targetType,
         targetId: item.targetId,
         isViolation: false,
         decisionStatus: "approved",
@@ -1018,16 +1066,14 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
         if (!target) continue;
 
         if (!decision.isViolation) {
-          if (target.targetType === "post") {
-            await this.createAiEvaluation(target, {
-              isViolation: false,
-              category: null,
-              confidence: 0,
-              decisionStatus: "approved",
-              reason: decision.reason || "AI không phát hiện vi phạm.",
-              moderationCaseId: null,
-            });
-          }
+          await this.createAiEvaluation(target, {
+            isViolation: false,
+            category: null,
+            confidence: 0,
+            decisionStatus: "approved",
+            reason: decision.reason || "AI không phát hiện vi phạm.",
+            moderationCaseId: null,
+          });
           continue;
         }
 
@@ -1047,7 +1093,7 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
           matchedTerms: [],
           aiRawOutput: decision as unknown as Record<string, unknown>,
         });
-        if (target.targetType === "post" && moderationCase.source === "ai") {
+        if (moderationCase.source === "ai") {
           await this.createAiEvaluation(target, {
             isViolation: true,
             category: decision.category || null,
