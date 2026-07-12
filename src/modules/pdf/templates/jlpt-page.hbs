@@ -125,14 +125,16 @@
     </div>
   {{/each}}
   <!-- HÀNG 3: Nghĩa + ô trống -->
+  {{#each this.blankRows}}
   <div class="row">
-    <div class="left-cell text-info">{{this.meanings}}</div>
+    <div class="left-cell text-info">{{this.label}}</div>
     <div class="grid-container">
-      {{#each this.practiceBoxes}}
+      {{#each ../practiceBoxes}}
         <div class="grid-cell"></div>
       {{/each}}
     </div>
   </div>
+  {{/each}}
 </div>
 {{/each}}
 </body>

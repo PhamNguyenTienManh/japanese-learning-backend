@@ -140,10 +140,10 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
   }
 
   async generateJlptPdfFromWords(
-    words: { word: string; phonetic: string; meanings: string }[]
+    words: { word: string; phonetic: string; meanings: string; traceRows?: number; blankRows?: number }[]
   ) {
     // Trả cache nếu cùng bộ từ đã generate rồi
-    const cacheKey = words.map((w) => w.word).join("|");
+    const cacheKey = words.map((w) => `${w.word}:${w.traceRows ?? "default"}:${w.blankRows ?? "default"}`).join("|");
     if (this.pdfCache.has(cacheKey)) {
       this.logger.log("PDF cache hit");
       return this.pdfCache.get(cacheKey)!;
@@ -183,8 +183,11 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
         meanings: this.limitMeaningsForPdf(w.meanings),
         strokeSteps,
         practiceBoxes,
-        practiceRows: Array.from({ length: practiceRowCount }, (_, rowIndex) => ({
+        practiceRows: Array.from({ length: w.traceRows ?? practiceRowCount }, (_, rowIndex) => ({
           label: rowIndex === 0 ? phonetic : "",
+        })),
+        blankRows: Array.from({ length: w.blankRows ?? 1 }, (_, rowIndex) => ({
+          label: rowIndex === 0 ? this.limitMeaningsForPdf(w.meanings) : "",
         })),
       };
     });
