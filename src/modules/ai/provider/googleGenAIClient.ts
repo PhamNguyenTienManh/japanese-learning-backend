@@ -126,6 +126,7 @@ export class GoogleGenAIClient {
 
     return this.vertexAI.preview.getGenerativeModel({
       model: this.modelName,
+      systemInstruction: systemPrompt,
       generationConfig: {
         temperature: 0.2,
       },

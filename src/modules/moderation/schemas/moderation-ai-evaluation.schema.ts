@@ -5,6 +5,7 @@ import {
   ModerationReviewDecision,
   ModerationStatus,
 } from "./moderation-case.schema";
+import type { ModerationTargetType } from "./moderation-case.schema";
 
 export type ModerationAiDecisionStatus =
   | "approved"
@@ -14,6 +15,13 @@ export type ModerationAiDecisionStatus =
 export class ModerationAiEvaluation extends Document {
   @Prop({ type: Types.ObjectId, required: true })
   targetId: Types.ObjectId;
+
+  @Prop({
+    type: String,
+    enum: ["post", "comment", "reply_comment"],
+    default: "post",
+  })
+  targetType: ModerationTargetType;
 
   @Prop({ type: Boolean, required: true })
   isViolation: boolean;
@@ -68,6 +76,7 @@ export const ModerationAiEvaluationSchema = SchemaFactory.createForClass(
 );
 
 ModerationAiEvaluationSchema.index({ targetId: 1, createdAt: -1 });
+ModerationAiEvaluationSchema.index({ targetType: 1, reviewedAt: -1 });
 ModerationAiEvaluationSchema.index({ decisionStatus: 1, createdAt: -1 });
 ModerationAiEvaluationSchema.index({ reviewDecision: 1, createdAt: -1 });
 ModerationAiEvaluationSchema.index({ confidence: -1, createdAt: -1 });
